@@ -2,7 +2,7 @@ import streamlit as st
 
 st.set_page_config(
     page_title="The Whiff List",
-    page_icon="💨",
+    page_icon="💨 Test",
     layout="wide"
 )
 
@@ -10,13 +10,13 @@ st.title("The Whiff List 💨")
 st.subheader("2025 MLB Swing-and-Miss Offenders")
 st.write(
     """
-    Welcome to The Whiff List — a tongue-in-cheek Statcast dashboard
-    built to find the biggest swing-and-miss offenders of the 2025 MLB season.
+    An interactive Statcast dashboard built with pybaseball and Streamlit
+    to uncover the season's biggest swing-and-miss offenders.
     """
 )
 
-st.markdown("### Coming soon")
-st.write("- Pull 2025 Statcast pitch data")
-st.write("- Build a whiff leaderboard")
-st.write("- Add filters for pitch type, handedness, and minimum swings")
-st.write("- Add player detail pages")
+st.markdown("### Planned features")
+st.write("- Season leaderboard for worst whiff offenders")
+st.write("- Filters for minimum swings, pitch type, handedness, and count")
+st.write("- Player-level whiff breakdowns")
+st.write("- A tongue-in-cheek 'Hall of Shame' style presentation")
