@@ -47,7 +47,13 @@ min_ab = st.sidebar.slider(
 # Leaderboard data
 # -----------------------------
 df = pd.read_csv("data/whiff_leaderboard_test.csv")
-df["player_name"] = df["player_name"].str.title()
+st.write("Leaderboard columns:", df.columns.tolist())
+st.write(df.head())
+
+if "player_name" in df.columns:
+    df["player_name"] = df["player_name"].str.title()
+else:
+    st.write("player_name column not found")
 
 df_filtered = df[
     (df["swings"] >= min_swings) &
