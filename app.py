@@ -4,6 +4,25 @@ import numpy as np
 import plotly.graph_objects as go
 
 
+@st.cache_data
+def load_leaderboard_data():
+    df = pd.read_csv("data/whiff_leaderboard_test.csv")
+    df["player_name"] = df["player_name"].str.title()
+    return df
+
+
+@st.cache_data
+def load_pitch_data():
+    return pd.read_csv("data/statcast_test_2025_04_01_to_04_07.csv", low_memory=False)
+
+
+def last_first_to_first_last(name):
+    if isinstance(name, str) and "," in name:
+        parts = [part.strip() for part in name.split(",", 1)]
+        return f"{parts[1]} {parts[0]}"
+    return name
+
+
 st.set_page_config(
     page_title="The Whiff List",
     page_icon="💨",
@@ -51,8 +70,7 @@ view = st.radio(
 )
 
 if view == "Leaderboard":
-    df = pd.read_csv("data/whiff_leaderboard_test.csv")
-    df["player_name"] = df["player_name"].str.title()
+    df = load_leaderboard_data().copy()
 
     df_filtered = df[
         (df["swings"] >= min_swings) &
@@ -94,10 +112,8 @@ if view == "Leaderboard":
     )
 
 elif view == "Player Breakdown":
-    df = pd.read_csv("data/whiff_leaderboard_test.csv")
-    df["player_name"] = df["player_name"].str.title()
-
-    pitch_data = pd.read_csv("data/statcast_test_2025_04_01_to_04_07.csv", low_memory=False)
+    df = load_leaderboard_data().copy()
+    pitch_data = load_pitch_data().copy()
 
     whiff_descriptions = {
         "swinging_strike",
@@ -144,8 +160,7 @@ elif view == "Player Breakdown":
     pitch_data["miss_distance_inches"] = (pitch_data["miss_distance"] * 12).round(1)
     pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
     pitch_data["player_name"] = pitch_data["player_name"].str.title()
-    pitch_data["player_name"] = pitch_data["player_name"].apply(
-    lambda x: ", ".join(part.strip() for part in x.split(",", 1)[::-1]) if isinstance(x, str) and "," in x else x)
+    pitch_data["player_name"] = pitch_data["player_name"].apply(last_first_to_first_last)
 
     player_options = sorted(pitch_data["batter_name"].dropna().unique())
 
@@ -199,13 +214,14 @@ elif view == "Player Breakdown":
                 showscale=True,
                 colorbar=dict(title="Miss (in)")
             ),
-            text=player_whiffs["pitch_name"],
-            customdata=player_whiffs[["player_name", "pitch_name", "game_date", "miss_distance_inches"]],
+            customdata=player_whiffs[
+                ["player_name", "pitch_name", "game_date", "miss_distance_inches"]
+            ],
             hovertemplate=(
-            "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
-            "Date: %{customdata[2]}<br>"
-            "Miss Distance: %{customdata[3]} in"
-            "<extra></extra>"
+                "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
+                "Date: %{customdata[2]}<br>"
+                "Miss Distance: %{customdata[3]} in"
+                "<extra></extra>"
             )
         )
     )
