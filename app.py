@@ -183,21 +183,21 @@ elif view == "Player Breakdown":
     player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
     player_whiffs = player_whiffs.sort_values("miss_distance", ascending=False)
 
-    st.markdown(f"### Player Breakdown: {selected_player}")
-    st.write("These are the worst swing-and-miss pitches by distance from the strike zone.")
-
     selected_player_id = (
         int(player_whiffs["batter"].dropna().iloc[0])
         if not player_whiffs.empty else None
     )
 
-    if selected_player_id:
-        headshot_url = f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{selected_player_id}/headshot/67/current"
+    text_col, image_col = st.columns([4, 1])
 
-        left_spacer, image_col, right_col = st.columns([3.5, 1.2, 2])
+    with text_col:
+        st.markdown(f"### Player Breakdown: {selected_player}")
+        st.write("These are the worst swing-and-miss pitches by distance from the strike zone.")
 
-        with image_col:
-            st.image(headshot_url, width=160)
+    with image_col:
+        if selected_player_id:
+            headshot_url = f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{selected_player_id}/headshot/67/current"
+            st.image(headshot_url, width=170)
 
     st.dataframe(
         player_whiffs[
