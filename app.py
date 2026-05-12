@@ -176,13 +176,13 @@ elif view == "Player Breakdown":
     st.write("These are the worst swing-and-miss pitches by distance from the strike zone.")
 
     selected_player_id = (
-    int(player_whiffs["batter"].dropna().iloc[0])
-    if not player_whiffs.empty else None
-)
+        int(player_whiffs["batter"].dropna().iloc[0])
+        if not player_whiffs.empty else None
+    )
 
-if selected_player_id:
-    headshot_url = f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{selected_player_id}/headshot/67/current"
-    st.image(headshot_url, width=140)
+    if selected_player_id:
+        headshot_url = f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{selected_player_id}/headshot/67/current"
+        st.image(headshot_url, width=140)
 
     st.dataframe(
         player_whiffs[
