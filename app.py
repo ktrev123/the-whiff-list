@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 
 st.set_page_config(
     page_title="The Whiff List",
@@ -38,13 +39,34 @@ view_type = st.sidebar.selectbox(
     index=0
 )
 
-st.markdown("### Current settings")
-st.write(f"**Season:** {season}")
-st.write(f"**Minimum swings:** {min_swings}")
-st.write(f"**View:** {view_type}")
+sample_data = pd.DataFrame(
+    {
+        "Rank": [1, 2, 3, 4, 5],
+        "Player": ["Player A", "Player B", "Player C", "Player D", "Player E"],
+        "Team": ["NYY", "OAK", "CWS", "COL", "MIA"],
+        "Swings": [212, 198, 245, 176, 201],
+        "Whiffs": [89, 80, 95, 67, 75],
+        "Whiff Rate": [0.420, 0.404, 0.388, 0.381, 0.373]
+    }
+)
 
-st.markdown("### Coming next")
-st.write("- Pull 2025 Statcast pitch-level data with pybaseball")
-st.write("- Identify swings and whiffs")
-st.write("- Build the leaderboard of top offenders")
-st.write("- Add player-level charts and pitch breakdowns")
+filtered_data = sample_data[sample_data["Swings"] >= min_swings].copy()
+filtered_data["Whiff Rate"] = (filtered_data["Whiff Rate"] * 100).round(1).astype(str) + "%"
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Players shown", len(filtered_data))
+col2.metric("Season", season)
+col3.metric("Minimum swings", min_swings)
+
+st.markdown("### Hall of Shame leaderboard")
+
+st.dataframe(
+    filtered_data,
+    use_container_width=True,
+    hide_index=True
+)
+
+st.markdown("### Notes")
+st.write("- This is currently sample data for layout testing.")
+st.write("- Next step: replace placeholders with real 2025 Statcast swing-and-miss data.")
+st.write("- Future filters will include pitch type, handedness, and count.")
