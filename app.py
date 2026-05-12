@@ -161,22 +161,16 @@ elif view == "Player Breakdown":
         player_whiffs[
             [
                 "game_date",
+                "player_name",
                 "pitch_name",
-                "plate_x",
-                "plate_z",
-                "sz_top",
-                "sz_bot",
                 "miss_distance_inches"
             ]
         ]
         .rename(
             columns={
                 "game_date": "Date",
+                "player_name": "Pitcher"
                 "pitch_name": "Pitch Type",
-                "plate_x": "Plate X",
-                "plate_z": "Plate Z",
-                "sz_top": "SZ Top",
-                "sz_bot": "SZ Bot",
                 "miss_distance_inches": "Miss Distance (in)"
             }
         )
