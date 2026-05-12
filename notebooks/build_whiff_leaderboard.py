@@ -50,7 +50,9 @@ name_lookup = name_lookup.rename(
     }
 )
 
-name_lookup["player_name"] = name_lookup["first_name"] + " " + name_lookup["last_name"]
+name_lookup["player_name"] = (
+    name_lookup["first_name"].str.title() + " " + name_lookup["last_name"].str.title()
+)
 
 leaderboard = leaderboard.merge(
     name_lookup[["batter", "player_name"]],

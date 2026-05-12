@@ -40,6 +40,8 @@ view_type = st.sidebar.selectbox(
 )
 
 df = pd.read_csv("data/whiff_leaderboard_test.csv")
+df["player_name"] = df["player_name"].str.title()
+
 
 df_filtered = df[df["swings"] >= min_swings].copy()
 df_filtered["whiff_rate_pct"] = (df_filtered["whiff_rate"] * 100).round(1)
