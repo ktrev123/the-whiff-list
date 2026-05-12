@@ -153,9 +153,43 @@ elif view == "Player Breakdown":
         "In Zone",
         "Out of Zone"
     )
+
     pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
     pitch_data["player_name"] = pitch_data["player_name"].str.title()
     pitch_data["player_name"] = pitch_data["player_name"].apply(last_first_to_first_last)
+
+    for base_col in ["on_1b", "on_2b", "on_3b"]:
+        if base_col not in pitch_data.columns:
+            pitch_data[base_col] = np.nan
+
+    pitch_data["runners_on"] = (
+        pitch_data["on_1b"].notna().astype(int) +
+        pitch_data["on_2b"].notna().astype(int) +
+        pitch_data["on_3b"].notna().astype(int)
+    )
+
+    if all(col in pitch_data.columns for col in ["game_pk", "at_bat_number", "pitch_number"]):
+        pitch_data = pitch_data.sort_values(
+            ["game_pk", "at_bat_number", "pitch_number"]
+        ).copy()
+
+        pitch_data["prev_whiff"] = (
+            pitch_data.groupby(["game_pk", "at_bat_number"])["description"]
+            .shift(1)
+            .isin(whiff_descriptions)
+            .astype(int)
+        )
+    else:
+        pitch_data["prev_whiff"] = 0
+
+    pitch_data["embarrassment_index"] = (
+        10
+        + np.where(pitch_data["zone_split"] == "Out of Zone", 10, 0)
+        + np.where(pitch_data["runners_on"] == 1, 8, 0)
+        + np.where(pitch_data["runners_on"] >= 2, 12, 0)
+        + np.where(pitch_data["prev_whiff"] == 1, 10, 0)
+        + (pitch_data["miss_distance_inches"] * 1.25)
+    ).round(1)
 
     player_options = sorted(pitch_data["batter_name"].dropna().unique())
 
@@ -176,7 +210,6 @@ elif view == "Player Breakdown":
     st.session_state.selected_player_name = selected_player
 
     player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
-    player_whiffs = player_whiffs.sort_values("miss_distance", ascending=False)
 
     pitch_type_options = sorted(player_whiffs["pitch_name"].dropna().unique())
 
@@ -188,6 +221,11 @@ elif view == "Player Breakdown":
 
     if selected_pitch_types:
         player_whiffs = player_whiffs[player_whiffs["pitch_name"].isin(selected_pitch_types)].copy()
+
+    player_whiffs = player_whiffs.sort_values(
+        ["embarrassment_index", "miss_distance"],
+        ascending=[False, False]
+    ).copy()
 
     in_zone_whiffs = player_whiffs[player_whiffs["zone_split"] == "In Zone"]
     out_zone_whiffs = player_whiffs[player_whiffs["zone_split"] == "Out of Zone"]
@@ -224,7 +262,10 @@ elif view == "Player Breakdown":
                 "player_name",
                 "pitch_name",
                 "zone_split",
-                "miss_distance_inches"
+                "runners_on",
+                "prev_whiff",
+                "miss_distance_inches",
+                "embarrassment_index"
             ]
         ]
         .rename(
@@ -233,7 +274,10 @@ elif view == "Player Breakdown":
                 "player_name": "Pitcher",
                 "pitch_name": "Pitch Type",
                 "zone_split": "Zone Split",
-                "miss_distance_inches": "Miss Distance (in)"
+                "runners_on": "Runners On",
+                "prev_whiff": "Prev Pitch Whiff",
+                "miss_distance_inches": "Miss Distance (in)",
+                "embarrassment_index": "Embarrassment Index"
             }
         )
         .head(10),
@@ -253,19 +297,31 @@ elif view == "Player Breakdown":
             mode="markers",
             marker=dict(
                 size=10,
-                color=player_whiffs["miss_distance_inches"],
-                colorscale="Cividis",
+                color=player_whiffs["embarrassment_index"],
+                colorscale="Reds",
                 showscale=True,
-                colorbar=dict(title="Miss (in)")
+                colorbar=dict(title="Embarrassment Index")
             ),
             customdata=player_whiffs[
-                ["player_name", "pitch_name", "game_date", "miss_distance_inches", "zone_split"]
+                [
+                    "player_name",
+                    "pitch_name",
+                    "game_date",
+                    "miss_distance_inches",
+                    "zone_split",
+                    "runners_on",
+                    "prev_whiff",
+                    "embarrassment_index"
+                ]
             ],
             hovertemplate=(
                 "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
                 "Date: %{customdata[2]}<br>"
                 "Miss Distance: %{customdata[3]} in<br>"
-                "Zone Split: %{customdata[4]}"
+                "Zone Split: %{customdata[4]}<br>"
+                "Runners On: %{customdata[5]}<br>"
+                "Prev Pitch Whiff: %{customdata[6]}<br>"
+                "Embarrassment Index: %{customdata[7]}"
                 "<extra></extra>"
             )
         )
@@ -293,8 +349,7 @@ elif view == "Player Breakdown":
 
     st.markdown("### Notes")
     st.write(
-        "Swings include fouls, balls in play, and swinging strikes; "
-        "whiffs include swinging strikes and missed bunts. "
-        "In-zone whiffs are misses on pitches inside the estimated strike zone, "
-        "while out-of-zone whiffs are misses on pitches outside it."
+        "Embarrassment Index is a custom score that increases for out-of-zone whiffs, "
+        "whiffs with runners on base, consecutive whiffs within the same at-bat, "
+        "and larger miss distance from the strike zone."
     )
