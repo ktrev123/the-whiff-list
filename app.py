@@ -55,14 +55,6 @@ min_swings = st.sidebar.slider(
     step=5
 )
 
-min_ab = st.sidebar.slider(
-    "Minimum AB",
-    min_value=0,
-    max_value=50,
-    value=10,
-    step=5
-)
-
 view = st.radio(
     "View",
     ["Leaderboard", "Player Breakdown"],
@@ -73,8 +65,7 @@ if view == "Leaderboard":
     df = load_leaderboard_data().copy()
 
     df_filtered = df[
-        (df["swings"] >= min_swings) &
-        (df["ab"] >= min_ab)
+        df["swings"] >= min_swings
     ].copy()
 
     df_filtered["whiff_rate_pct"] = (df_filtered["whiff_rate"] * 100).round(1)
@@ -97,11 +88,10 @@ if view == "Leaderboard":
         }
     )
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     col1.metric("Players shown", len(df_filtered))
     col2.metric("Season", season)
     col3.metric("Minimum swings", min_swings)
-    col4.metric("Minimum AB", min_ab)
 
     st.markdown("### Leaderboard")
 
