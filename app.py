@@ -49,8 +49,7 @@ df_filtered["whiff_rate_pct"] = (df_filtered["whiff_rate"] * 100).round(1)
 df_filtered = df_filtered.rename(
     columns={
         "rank": "Rank",
-        "player_name": "Player",
-        "batter": "Batter ID",
+        "player_name": "Batter",
         "swings": "Swings",
         "whiffs": "Whiffs",
         "whiff_rate_pct": "Whiff Rate (%)"
@@ -65,7 +64,7 @@ col3.metric("Minimum swings", min_swings)
 st.markdown("### Hall of Shame leaderboard")
 
 st.dataframe(
-    df_filtered[["Rank", "Player", "Batter ID", "Swings", "Whiffs", "Whiff Rate (%)"]],
+    df_filtered[["Rank", "Batter", "Swings", "Whiffs", "Whiff Rate (%)"]],
     use_container_width=True,
     hide_index=True
 )
