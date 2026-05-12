@@ -183,6 +183,17 @@ elif view == "Player Breakdown":
     player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
     player_whiffs = player_whiffs.sort_values("miss_distance", ascending=False)
 
+    pitch_type_options = sorted(player_whiffs["pitch_name"].dropna().unique())
+
+    selected_pitch_types = st.sidebar.multiselect(
+        "Pitch Type",
+        options=pitch_type_options,
+        default=pitch_type_options
+    )
+
+    if selected_pitch_types:
+        player_whiffs = player_whiffs[player_whiffs["pitch_name"].isin(selected_pitch_types)].copy()
+
     selected_player_id = (
         int(player_whiffs["batter"].dropna().iloc[0])
         if not player_whiffs.empty else None
