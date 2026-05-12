@@ -44,152 +44,41 @@ min_ab = st.sidebar.slider(
     step=5
 )
 
-# -----------------------------
-# Leaderboard data
-# -----------------------------
-df = pd.read_csv("data/whiff_leaderboard_test.csv")
-df["player_name"] = df["player_name"].str.title()
-
-df_filtered = df[
-    (df["swings"] >= min_swings) &
-    (df["ab"] >= min_ab)
-].copy()
-
-df_filtered["whiff_rate_pct"] = (df_filtered["whiff_rate"] * 100).round(1)
-
-df_filtered = df_filtered.sort_values(
-    ["whiff_rate", "whiffs"],
-    ascending=[False, False]
-).reset_index(drop=True)
-
-df_filtered["rank_display"] = df_filtered.index + 1
-
-df_filtered = df_filtered.rename(
-    columns={
-        "rank_display": "Rank",
-        "player_name": "Batter",
-        "ab": "AB",
-        "swings": "Swings",
-        "whiffs": "Whiffs",
-        "whiff_rate_pct": "Whiff Rate (%)"
-    }
+view = st.radio(
+    "View",
+    ["Leaderboard", "Player Breakdown"],
+    horizontal=True
 )
 
-# -----------------------------
-# Player Breakdown data
-# -----------------------------
-pitch_data = pd.read_csv("data/statcast_test_2025_04_01_to_04_07.csv", low_memory=False)
+if view == "Leaderboard":
+    df = pd.read_csv("data/whiff_leaderboard_test.csv")
+    df["player_name"] = df["player_name"].str.title()
 
-whiff_descriptions = {
-    "swinging_strike",
-    "swinging_strike_blocked",
-    "missed_bunt"
-}
+    df_filtered = df[
+        (df["swings"] >= min_swings) &
+        (df["ab"] >= min_ab)
+    ].copy()
 
-pitch_data = pitch_data[pitch_data["description"].isin(whiff_descriptions)].copy()
-pitch_data = pitch_data.dropna(subset=["batter", "plate_x", "plate_z", "sz_top", "sz_bot"])
+    df_filtered["whiff_rate_pct"] = (df_filtered["whiff_rate"] * 100).round(1)
 
-name_lookup = (
-    df[["batter", "player_name"]]
-    .drop_duplicates()
-    .rename(columns={"player_name": "batter_name"})
-)
+    df_filtered = df_filtered.sort_values(
+        ["whiff_rate", "whiffs"],
+        ascending=[False, False]
+    ).reset_index(drop=True)
 
-pitch_data = pitch_data.merge(name_lookup, on="batter", how="left")
+    df_filtered["rank_display"] = df_filtered.index + 1
 
-
-def calculate_miss_distance(row):
-    x = row["plate_x"]
-    z = row["plate_z"]
-    left_edge = -0.708
-    right_edge = 0.708
-    bottom_edge = row["sz_bot"]
-    top_edge = row["sz_top"]
-
-    if x < left_edge:
-        x_out = left_edge - x
-    elif x > right_edge:
-        x_out = x - right_edge
-    else:
-        x_out = 0
-
-    if z < bottom_edge:
-        z_out = bottom_edge - z
-    elif z > top_edge:
-        z_out = z - top_edge
-    else:
-        z_out = 0
-
-    return np.sqrt((x_out ** 2) + (z_out ** 2))
-
-
-pitch_data["miss_distance"] = pitch_data.apply(calculate_miss_distance, axis=1)
-pitch_data["miss_distance_inches"] = (pitch_data["miss_distance"] * 12).round(1)
-pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
-
-player_options = sorted(pitch_data["batter_name"].dropna().unique())
-
-selected_player = st.sidebar.selectbox(
-    "Player Breakdown",
-    player_options
-)
-
-player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
-player_whiffs = player_whiffs.sort_values("miss_distance", ascending=False)
-
-avg_top = player_whiffs["sz_top"].mean()
-avg_bot = player_whiffs["sz_bot"].mean()
-
-fig = go.Figure()
-
-fig.add_trace(
-    go.Scatter(
-        x=player_whiffs["plate_x"],
-        y=player_whiffs["plate_z"],
-        mode="markers",
-        marker=dict(
-            size=10,
-            color=player_whiffs["miss_distance_inches"],
-            colorscale="Reds",
-            showscale=True,
-            colorbar=dict(title="Miss (in)")
-        ),
-        text=player_whiffs["pitch_name"],
-        customdata=player_whiffs[["game_date", "miss_distance_inches"]],
-        hovertemplate=(
-            "<b>%{text}</b><br>"
-            "Date: %{customdata[0]}<br>"
-            "Miss Distance: %{customdata[1]} in<br>"
-            "plate_x: %{x:.2f}<br>"
-            "plate_z: %{y:.2f}<extra></extra>"
-        )
+    df_filtered = df_filtered.rename(
+        columns={
+            "rank_display": "Rank",
+            "player_name": "Batter",
+            "ab": "AB",
+            "swings": "Swings",
+            "whiffs": "Whiffs",
+            "whiff_rate_pct": "Whiff Rate (%)"
+        }
     )
-)
 
-fig.add_shape(
-    type="rect",
-    x0=-0.708,
-    x1=0.708,
-    y0=avg_bot,
-    y1=avg_top,
-    line=dict(color="white", width=2)
-)
-
-fig.update_layout(
-    title=f"{selected_player} Whiff Locations",
-    xaxis_title="Horizontal Location (plate_x)",
-    yaxis_title="Vertical Location (plate_z)",
-    xaxis=dict(range=[-2.5, 2.5]),
-    yaxis=dict(range=[0, 5]),
-    height=600
-)
-
-# -----------------------------
-# Tabs
-# -----------------------------
-leaderboard_tab, player_tab = st.tabs(["Leaderboard", "Player Breakdown"])
-
-with leaderboard_tab:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Players shown", len(df_filtered))
     col2.metric("Season", season)
@@ -204,7 +93,67 @@ with leaderboard_tab:
         hide_index=True
     )
 
-with player_tab:
+elif view == "Player Breakdown":
+    df = pd.read_csv("data/whiff_leaderboard_test.csv")
+    df["player_name"] = df["player_name"].str.title()
+
+    pitch_data = pd.read_csv("data/statcast_test_2025_04_01_to_04_07.csv", low_memory=False)
+
+    whiff_descriptions = {
+        "swinging_strike",
+        "swinging_strike_blocked",
+        "missed_bunt"
+    }
+
+    pitch_data = pitch_data[pitch_data["description"].isin(whiff_descriptions)].copy()
+    pitch_data = pitch_data.dropna(subset=["batter", "plate_x", "plate_z", "sz_top", "sz_bot"])
+
+    name_lookup = (
+        df[["batter", "player_name"]]
+        .drop_duplicates()
+        .rename(columns={"player_name": "batter_name"})
+    )
+
+    pitch_data = pitch_data.merge(name_lookup, on="batter", how="left")
+
+    def calculate_miss_distance(row):
+        x = row["plate_x"]
+        z = row["plate_z"]
+        left_edge = -0.708
+        right_edge = 0.708
+        bottom_edge = row["sz_bot"]
+        top_edge = row["sz_top"]
+
+        if x < left_edge:
+            x_out = left_edge - x
+        elif x > right_edge:
+            x_out = x - right_edge
+        else:
+            x_out = 0
+
+        if z < bottom_edge:
+            z_out = bottom_edge - z
+        elif z > top_edge:
+            z_out = z - top_edge
+        else:
+            z_out = 0
+
+        return np.sqrt((x_out ** 2) + (z_out ** 2))
+
+    pitch_data["miss_distance"] = pitch_data.apply(calculate_miss_distance, axis=1)
+    pitch_data["miss_distance_inches"] = (pitch_data["miss_distance"] * 12).round(1)
+    pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
+
+    player_options = sorted(pitch_data["batter_name"].dropna().unique())
+
+    selected_player = st.sidebar.selectbox(
+        "Player Breakdown",
+        player_options
+    )
+
+    player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
+    player_whiffs = player_whiffs.sort_values("miss_distance", ascending=False)
+
     st.markdown(f"### Player Breakdown: {selected_player}")
     st.write("These are the worst swing-and-miss pitches by distance from the strike zone.")
 
@@ -236,11 +185,58 @@ with player_tab:
         hide_index=True
     )
 
+    avg_top = player_whiffs["sz_top"].mean()
+    avg_bot = player_whiffs["sz_bot"].mean()
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter(
+            x=player_whiffs["plate_x"],
+            y=player_whiffs["plate_z"],
+            mode="markers",
+            marker=dict(
+                size=10,
+                color=player_whiffs["miss_distance_inches"],
+                colorscale="Reds",
+                showscale=True,
+                colorbar=dict(title="Miss (in)")
+            ),
+            text=player_whiffs["pitch_name"],
+            customdata=player_whiffs[["game_date", "miss_distance_inches"]],
+            hovertemplate=(
+                "<b>%{text}</b><br>"
+                "Date: %{customdata[0]}<br>"
+                "Miss Distance: %{customdata[1]} in<br>"
+                "plate_x: %{x:.2f}<br>"
+                "plate_z: %{y:.2f}<extra></extra>"
+            )
+        )
+    )
+
+    fig.add_shape(
+        type="rect",
+        x0=-0.708,
+        x1=0.708,
+        y0=avg_bot,
+        y1=avg_top,
+        line=dict(color="white", width=2)
+    )
+
+    fig.update_layout(
+        title=f"{selected_player} Whiff Locations",
+        xaxis_title="Horizontal Location (plate_x)",
+        yaxis_title="Vertical Location (plate_z)",
+        xaxis=dict(range=[-2.5, 2.5]),
+        yaxis=dict(range=[0, 5]),
+        height=600
+    )
+
     st.plotly_chart(fig, use_container_width=True)
 
-st.markdown("### Notes")
-st.write(
-    "Swings include fouls, balls in play, and swinging strikes; "
-    "whiffs include swinging strikes and missed bunts. "
-    "Player Breakdown ranks whiffs by estimated distance from the strike zone."
-)
+    st.markdown("### Notes")
+    st.write(
+        "Swings include fouls, balls in play, and swinging strikes; "
+        "whiffs include swinging strikes and missed bunts. "
+        "Player Breakdown ranks whiffs by estimated distance from the strike zone."
+    )
