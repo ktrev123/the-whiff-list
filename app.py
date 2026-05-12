@@ -91,7 +91,8 @@ st.dataframe(
 # -----------------------------
 # Player Breakdown
 # -----------------------------
-pitch_data = pd.read_csv("data/statcast_test_2025_04_01_to_04_07.csv")
+st.write("Loading pitch-level chart data...")
+pitch_data = pd.read_csv("data/statcast_test_2025_04_01_to_04_07.csv", low_memory=False)
 
 whiff_descriptions = {
     "swinging_strike",
