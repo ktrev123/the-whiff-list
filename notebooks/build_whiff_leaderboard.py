@@ -24,14 +24,31 @@ whiff_descriptions = {
     "missed_bunt"
 }
 
+ab_events = {
+    "single",
+    "double",
+    "triple",
+    "home_run",
+    "field_out",
+    "grounded_into_double_play",
+    "force_out",
+    "double_play",
+    "fielders_choice",
+    "field_error",
+    "strikeout",
+    "strikeout_double_play"
+}
+
 df["is_swing"] = df["description"].isin(swing_descriptions)
 df["is_whiff"] = df["description"].isin(whiff_descriptions)
+df["is_ab"] = df["events"].isin(ab_events)
 
 leaderboard = (
     df.groupby("batter", dropna=False)
       .agg(
           swings=("is_swing", "sum"),
-          whiffs=("is_whiff", "sum")
+          whiffs=("is_whiff", "sum"),
+          ab=("is_ab", "sum")
       )
       .reset_index()
 )
@@ -68,7 +85,7 @@ leaderboard = leaderboard.sort_values(
 leaderboard["rank"] = leaderboard.index + 1
 
 leaderboard = leaderboard[
-    ["rank", "batter", "player_name", "swings", "whiffs", "whiff_rate"]
+    ["rank", "batter", "player_name", "ab", "swings", "whiffs", "whiff_rate"]
 ]
 
 leaderboard.to_csv(output_file, index=False)

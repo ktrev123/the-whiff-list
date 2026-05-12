@@ -33,6 +33,14 @@ min_swings = st.sidebar.slider(
     step=5
 )
 
+min_ab = st.sidebar.slider(
+    "Minimum AB",
+    min_value=0,
+    max_value=50,
+    value=10,
+    step=5
+)
+
 view_type = st.sidebar.selectbox(
     "View",
     options=["Leaderboard"],
@@ -42,29 +50,41 @@ view_type = st.sidebar.selectbox(
 df = pd.read_csv("data/whiff_leaderboard_test.csv")
 df["player_name"] = df["player_name"].str.title()
 
+df_filtered = df[
+    (df["swings"] >= min_swings) &
+    (df["ab"] >= min_ab)
+].copy()
 
-df_filtered = df[df["swings"] >= min_swings].copy()
 df_filtered["whiff_rate_pct"] = (df_filtered["whiff_rate"] * 100).round(1)
+
+df_filtered = df_filtered.sort_values(
+    ["whiff_rate", "whiffs"],
+    ascending=[False, False]
+).reset_index(drop=True)
+
+df_filtered["rank_display"] = df_filtered.index + 1
 
 df_filtered = df_filtered.rename(
     columns={
-        "rank": "Rank",
+        "rank_display": "Rank",
         "player_name": "Batter",
+        "ab": "AB",
         "swings": "Swings",
         "whiffs": "Whiffs",
         "whiff_rate_pct": "Whiff Rate (%)"
     }
 )
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 col1.metric("Players shown", len(df_filtered))
 col2.metric("Season", season)
 col3.metric("Minimum swings", min_swings)
+col4.metric("Minimum AB", min_ab)
 
 st.markdown("### Hall of Shame leaderboard")
 
 st.dataframe(
-    df_filtered[["Rank", "Batter", "Swings", "Whiffs", "Whiff Rate (%)"]],
+    df_filtered[["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)"]],
     use_container_width=True,
     hide_index=True
 )
@@ -72,6 +92,5 @@ st.dataframe(
 st.markdown("### Notes")
 st.write(
     "Swings include fouls, balls in play, and swinging strikes; "
-    "whiffs include swinging strikes and missed bunts. "
-    "Batter ID is the MLBAM identifier used in Statcast and pybaseball."
+    "whiffs include swinging strikes and missed bunts."
 )
