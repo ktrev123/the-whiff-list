@@ -181,11 +181,7 @@ elif view == "Player Breakdown":
 )
 
 if selected_player_id:
-    headshot_url = (
-        f"https://img.mlbstatic.com/mlb-photos/image/upload/"
-        f"w_213,d_people:generic:headshot:silo:current.png,"
-        f"q_auto:best,f_auto/v1/people/{selected_player_id}/headshot/67/current"
-    )
+    headshot_url = f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{selected_player_id}/headshot/67/current"
     st.image(headshot_url, width=140)
 
     st.dataframe(
