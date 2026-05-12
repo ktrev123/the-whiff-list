@@ -165,9 +165,9 @@ elif view == "Player Breakdown":
     player_options = sorted(pitch_data["batter_name"].dropna().unique())
 
     selected_player = st.sidebar.selectbox(
-        "Player Breakdown",
-        player_options
-    )
+    "Player Breakdown",
+    player_options,
+    key="selected_player_breakdown")
 
     player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
     player_whiffs = player_whiffs.sort_values("miss_distance", ascending=False)
@@ -182,6 +182,10 @@ elif view == "Player Breakdown":
 
     if selected_player_id:
         headshot_url = f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{selected_player_id}/headshot/67/current"
+
+    left_spacer, image_col, right_col = st.columns([1.2, 1, 4])
+
+    with image_col:
         st.image(headshot_url, width=140)
 
     st.dataframe(
