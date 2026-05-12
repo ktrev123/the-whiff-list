@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
+
 st.set_page_config(
     page_title="The Whiff List",
     page_icon="💨",
@@ -74,24 +75,9 @@ df_filtered = df_filtered.rename(
     }
 )
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Players shown", len(df_filtered))
-col2.metric("Season", season)
-col3.metric("Minimum swings", min_swings)
-col4.metric("Minimum AB", min_ab)
-
-st.markdown("### Leaderboard")
-
-st.dataframe(
-    df_filtered[["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)"]],
-    use_container_width=True,
-    hide_index=True
-)
-
 # -----------------------------
-# Player Breakdown
+# Player Breakdown data
 # -----------------------------
-st.write("Loading pitch-level chart data...")
 pitch_data = pd.read_csv("data/statcast_test_2025_04_01_to_04_07.csv", low_memory=False)
 
 whiff_descriptions = {
@@ -110,6 +96,7 @@ name_lookup = (
 )
 
 pitch_data = pitch_data.merge(name_lookup, on="batter", how="left")
+
 
 def calculate_miss_distance(row):
     x = row["plate_x"]
@@ -135,6 +122,7 @@ def calculate_miss_distance(row):
 
     return np.sqrt((x_out ** 2) + (z_out ** 2))
 
+
 pitch_data["miss_distance"] = pitch_data.apply(calculate_miss_distance, axis=1)
 pitch_data["miss_distance_inches"] = (pitch_data["miss_distance"] * 12).round(1)
 pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
@@ -148,37 +136,6 @@ selected_player = st.sidebar.selectbox(
 
 player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
 player_whiffs = player_whiffs.sort_values("miss_distance", ascending=False)
-
-st.markdown(f"### Player Breakdown: {selected_player}")
-st.write("These are the worst swing-and-miss pitches by distance from the strike zone.")
-
-st.dataframe(
-    player_whiffs[
-        [
-            "game_date",
-            "pitch_name",
-            "plate_x",
-            "plate_z",
-            "sz_top",
-            "sz_bot",
-            "miss_distance_inches"
-        ]
-    ]
-    .rename(
-        columns={
-            "game_date": "Date",
-            "pitch_name": "Pitch Type",
-            "plate_x": "Plate X",
-            "plate_z": "Plate Z",
-            "sz_top": "SZ Top",
-            "sz_bot": "SZ Bot",
-            "miss_distance_inches": "Miss Distance (in)"
-        }
-    )
-    .head(10),
-    use_container_width=True,
-    hide_index=True
-)
 
 avg_top = player_whiffs["sz_top"].mean()
 avg_bot = player_whiffs["sz_bot"].mean()
@@ -227,7 +184,59 @@ fig.update_layout(
     height=600
 )
 
-st.plotly_chart(fig, use_container_width=True)
+# -----------------------------
+# Tabs
+# -----------------------------
+leaderboard_tab, player_tab = st.tabs(["Leaderboard", "Player Breakdown"])
+
+with leaderboard_tab:
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Players shown", len(df_filtered))
+    col2.metric("Season", season)
+    col3.metric("Minimum swings", min_swings)
+    col4.metric("Minimum AB", min_ab)
+
+    st.markdown("### Leaderboard")
+
+    st.dataframe(
+        df_filtered[["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)"]],
+        use_container_width=True,
+        hide_index=True
+    )
+
+with player_tab:
+    st.markdown(f"### Player Breakdown: {selected_player}")
+    st.write("These are the worst swing-and-miss pitches by distance from the strike zone.")
+
+    st.dataframe(
+        player_whiffs[
+            [
+                "game_date",
+                "pitch_name",
+                "plate_x",
+                "plate_z",
+                "sz_top",
+                "sz_bot",
+                "miss_distance_inches"
+            ]
+        ]
+        .rename(
+            columns={
+                "game_date": "Date",
+                "pitch_name": "Pitch Type",
+                "plate_x": "Plate X",
+                "plate_z": "Plate Z",
+                "sz_top": "SZ Top",
+                "sz_bot": "SZ Bot",
+                "miss_distance_inches": "Miss Distance (in)"
+            }
+        )
+        .head(10),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("### Notes")
 st.write(
