@@ -61,9 +61,106 @@ view = st.radio(
     horizontal=True
 )
 
-if view == "Leaderboard":
-    df = load_leaderboard_data().copy()
+df = load_leaderboard_data().copy()
+pitch_data = load_pitch_data().copy()
 
+whiff_descriptions = {
+    "swinging_strike",
+    "swinging_strike_blocked",
+    "missed_bunt"
+}
+
+pitch_data = pitch_data[pitch_data["description"].isin(whiff_descriptions)].copy()
+pitch_data = pitch_data.dropna(subset=["batter", "plate_x", "plate_z", "sz_top", "sz_bot"])
+
+name_lookup = (
+    df[["batter", "player_name"]]
+    .drop_duplicates()
+    .rename(columns={"player_name": "batter_name"})
+)
+
+pitch_data = pitch_data.merge(name_lookup, on="batter", how="left")
+
+
+def calculate_miss_distance(row):
+    x = row["plate_x"]
+    z = row["plate_z"]
+    left_edge = -0.708
+    right_edge = 0.708
+    bottom_edge = row["sz_bot"]
+    top_edge = row["sz_top"]
+
+    if x < left_edge:
+        x_out = left_edge - x
+    elif x > right_edge:
+        x_out = x - right_edge
+    else:
+        x_out = 0
+
+    if z < bottom_edge:
+        z_out = bottom_edge - z
+    elif z > top_edge:
+        z_out = z - top_edge
+    else:
+        z_out = 0
+
+    return np.sqrt((x_out ** 2) + (z_out ** 2))
+
+
+pitch_data["miss_distance"] = pitch_data.apply(calculate_miss_distance, axis=1)
+pitch_data["miss_distance_inches"] = (pitch_data["miss_distance"] * 12).round(1)
+pitch_data["zone_split"] = np.where(
+    pitch_data["miss_distance"] == 0,
+    "In Zone",
+    "Out of Zone"
+)
+
+pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
+pitch_data["player_name"] = pitch_data["player_name"].str.title()
+pitch_data["player_name"] = pitch_data["player_name"].apply(last_first_to_first_last)
+
+for base_col in ["on_1b", "on_2b", "on_3b"]:
+    if base_col not in pitch_data.columns:
+        pitch_data[base_col] = np.nan
+
+pitch_data["runners_on"] = (
+    pitch_data["on_1b"].notna().astype(int) +
+    pitch_data["on_2b"].notna().astype(int) +
+    pitch_data["on_3b"].notna().astype(int)
+)
+
+if all(col in pitch_data.columns for col in ["game_pk", "at_bat_number", "pitch_number"]):
+    pitch_data = pitch_data.sort_values(
+        ["game_pk", "at_bat_number", "pitch_number"]
+    ).copy()
+
+    pitch_data["prev_whiff"] = (
+        pitch_data.groupby(["game_pk", "at_bat_number"])["description"]
+        .shift(1)
+        .isin(whiff_descriptions)
+        .astype(int)
+    )
+else:
+    pitch_data["prev_whiff"] = 0
+
+pitch_data["embarrassment_index"] = (
+    10
+    + np.where(pitch_data["zone_split"] == "Out of Zone", 10, 0)
+    + (pitch_data["runners_on"] * 6)
+    + np.where(pitch_data["prev_whiff"] == 1, 10, 0)
+    + (pitch_data["miss_distance_inches"] * 1.25)
+).round(1)
+
+avg_embarrassment = (
+    pitch_data.groupby("batter", as_index=False)["embarrassment_index"]
+    .mean()
+    .rename(columns={"embarrassment_index": "avg_embarrassment_index"})
+)
+
+df = df.merge(avg_embarrassment, on="batter", how="left")
+df["avg_embarrassment_index"] = df["avg_embarrassment_index"].round(1)
+
+if view == "Leaderboard":
     df_filtered = df[
         df["swings"] >= min_swings
     ].copy()
@@ -71,8 +168,8 @@ if view == "Leaderboard":
     df_filtered["whiff_rate_pct"] = (df_filtered["whiff_rate"] * 100).round(1)
 
     df_filtered = df_filtered.sort_values(
-        ["whiff_rate", "whiffs"],
-        ascending=[False, False]
+        ["avg_embarrassment_index", "whiff_rate", "whiffs"],
+        ascending=[False, False, False]
     ).reset_index(drop=True)
 
     df_filtered["rank_display"] = df_filtered.index + 1
@@ -84,7 +181,8 @@ if view == "Leaderboard":
             "ab": "AB",
             "swings": "Swings",
             "whiffs": "Whiffs",
-            "whiff_rate_pct": "Whiff Rate (%)"
+            "whiff_rate_pct": "Whiff Rate (%)",
+            "avg_embarrassment_index": "Avg Embarrassment Index"
         }
     )
 
@@ -96,101 +194,14 @@ if view == "Leaderboard":
     st.markdown("### Leaderboard")
 
     st.dataframe(
-        df_filtered[["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)"]],
+        df_filtered[
+            ["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)", "Avg Embarrassment Index"]
+        ],
         use_container_width=True,
         hide_index=True
     )
 
 elif view == "Player Breakdown":
-    df = load_leaderboard_data().copy()
-    pitch_data = load_pitch_data().copy()
-
-    whiff_descriptions = {
-        "swinging_strike",
-        "swinging_strike_blocked",
-        "missed_bunt"
-    }
-
-    pitch_data = pitch_data[pitch_data["description"].isin(whiff_descriptions)].copy()
-    pitch_data = pitch_data.dropna(subset=["batter", "plate_x", "plate_z", "sz_top", "sz_bot"])
-
-    name_lookup = (
-        df[["batter", "player_name"]]
-        .drop_duplicates()
-        .rename(columns={"player_name": "batter_name"})
-    )
-
-    pitch_data = pitch_data.merge(name_lookup, on="batter", how="left")
-
-    def calculate_miss_distance(row):
-        x = row["plate_x"]
-        z = row["plate_z"]
-        left_edge = -0.708
-        right_edge = 0.708
-        bottom_edge = row["sz_bot"]
-        top_edge = row["sz_top"]
-
-        if x < left_edge:
-            x_out = left_edge - x
-        elif x > right_edge:
-            x_out = x - right_edge
-        else:
-            x_out = 0
-
-        if z < bottom_edge:
-            z_out = bottom_edge - z
-        elif z > top_edge:
-            z_out = z - top_edge
-        else:
-            z_out = 0
-
-        return np.sqrt((x_out ** 2) + (z_out ** 2))
-
-    pitch_data["miss_distance"] = pitch_data.apply(calculate_miss_distance, axis=1)
-    pitch_data["miss_distance_inches"] = (pitch_data["miss_distance"] * 12).round(1)
-    pitch_data["zone_split"] = np.where(
-        pitch_data["miss_distance"] == 0,
-        "In Zone",
-        "Out of Zone"
-    )
-
-    pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
-    pitch_data["player_name"] = pitch_data["player_name"].str.title()
-    pitch_data["player_name"] = pitch_data["player_name"].apply(last_first_to_first_last)
-
-    for base_col in ["on_1b", "on_2b", "on_3b"]:
-        if base_col not in pitch_data.columns:
-            pitch_data[base_col] = np.nan
-
-    pitch_data["runners_on"] = (
-        pitch_data["on_1b"].notna().astype(int) +
-        pitch_data["on_2b"].notna().astype(int) +
-        pitch_data["on_3b"].notna().astype(int)
-    )
-
-    if all(col in pitch_data.columns for col in ["game_pk", "at_bat_number", "pitch_number"]):
-        pitch_data = pitch_data.sort_values(
-            ["game_pk", "at_bat_number", "pitch_number"]
-        ).copy()
-
-        pitch_data["prev_whiff"] = (
-            pitch_data.groupby(["game_pk", "at_bat_number"])["description"]
-            .shift(1)
-            .isin(whiff_descriptions)
-            .astype(int)
-        )
-    else:
-        pitch_data["prev_whiff"] = 0
-
-    pitch_data["embarrassment_index"] = (
-        10
-        + np.where(pitch_data["zone_split"] == "Out of Zone", 10, 0)
-        + np.where(pitch_data["runners_on"] == 1, 8, 0)
-        + np.where(pitch_data["runners_on"] >= 2, 12, 0)
-        + np.where(pitch_data["prev_whiff"] == 1, 10, 0)
-        + (pitch_data["miss_distance_inches"] * 1.25)
-    ).round(1)
-
     player_options = sorted(pitch_data["batter_name"].dropna().unique())
 
     if "selected_player_name" not in st.session_state:
@@ -239,7 +250,7 @@ elif view == "Player Breakdown":
 
     with text_col:
         st.markdown(f"### Player Breakdown: {selected_player}")
-        st.write("These are the worst swing-and-miss pitches by distance from the strike zone.")
+        st.write("These are the worst swing-and-miss pitches ranked by Embarrassment Index.")
 
     with image_col:
         if selected_player_id:
@@ -251,8 +262,8 @@ elif view == "Player Breakdown":
     metric2.metric("In-Zone Whiffs", len(in_zone_whiffs))
     metric3.metric("Out-of-Zone Whiffs", len(out_zone_whiffs))
     metric4.metric(
-        "Out-of-Zone Whiff %",
-        f"{(len(out_zone_whiffs) / len(player_whiffs) * 100):.1f}%" if len(player_whiffs) > 0 else "0.0%"
+        "Avg Embarrassment",
+        f"{player_whiffs['embarrassment_index'].mean():.1f}" if len(player_whiffs) > 0 else "0.0"
     )
 
     st.dataframe(
@@ -350,6 +361,6 @@ elif view == "Player Breakdown":
     st.markdown("### Notes")
     st.write(
         "Embarrassment Index is a custom score that increases for out-of-zone whiffs, "
-        "whiffs with runners on base, consecutive whiffs within the same at-bat, "
+        "more runners on base, consecutive whiffs within the same at-bat, "
         "and larger miss distance from the strike zone."
     )
