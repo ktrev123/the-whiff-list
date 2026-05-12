@@ -169,7 +169,7 @@ elif view == "Player Breakdown":
         .rename(
             columns={
                 "game_date": "Date",
-                "player_name": "Pitcher"
+                "player_name": "Pitcher",
                 "pitch_name": "Pitch Type",
                 "miss_distance_inches": "Miss Distance (in)"
             }
