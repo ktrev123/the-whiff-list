@@ -143,6 +143,9 @@ elif view == "Player Breakdown":
     pitch_data["miss_distance"] = pitch_data.apply(calculate_miss_distance, axis=1)
     pitch_data["miss_distance_inches"] = (pitch_data["miss_distance"] * 12).round(1)
     pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
+    pitch_data["player_name"] = pitch_data["player_name"].str.title()
+    pitch_data["player_name"] = pitch_data["player_name"].apply(
+    lambda x: ", ".join(part.strip() for part in x.split(",", 1)[::-1]) if isinstance(x, str) and "," in x else x)
 
     player_options = sorted(pitch_data["batter_name"].dropna().unique())
 
@@ -192,18 +195,17 @@ elif view == "Player Breakdown":
             marker=dict(
                 size=10,
                 color=player_whiffs["miss_distance_inches"],
-                colorscale="Reds",
+                colorscale="Cividis",
                 showscale=True,
                 colorbar=dict(title="Miss (in)")
             ),
             text=player_whiffs["pitch_name"],
-            customdata=player_whiffs[["game_date", "miss_distance_inches"]],
+            customdata=player_whiffs[["player_name", "pitch_name", "game_date", "miss_distance_inches"]],
             hovertemplate=(
-                "<b>%{text}</b><br>"
-                "Date: %{customdata[0]}<br>"
-                "Miss Distance: %{customdata[1]} in<br>"
-                "plate_x: %{x:.2f}<br>"
-                "plate_z: %{y:.2f}<extra></extra>"
+            "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
+            "Date: %{customdata[2]}<br>"
+            "Miss Distance: %{customdata[3]} in"
+            "<extra></extra>"
             )
         )
     )
