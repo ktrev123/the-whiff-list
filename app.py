@@ -148,6 +148,11 @@ elif view == "Player Breakdown":
 
     pitch_data["miss_distance"] = pitch_data.apply(calculate_miss_distance, axis=1)
     pitch_data["miss_distance_inches"] = (pitch_data["miss_distance"] * 12).round(1)
+    pitch_data["zone_split"] = np.where(
+        pitch_data["miss_distance"] == 0,
+        "In Zone",
+        "Out of Zone"
+    )
     pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
     pitch_data["player_name"] = pitch_data["player_name"].str.title()
     pitch_data["player_name"] = pitch_data["player_name"].apply(last_first_to_first_last)
@@ -184,6 +189,9 @@ elif view == "Player Breakdown":
     if selected_pitch_types:
         player_whiffs = player_whiffs[player_whiffs["pitch_name"].isin(selected_pitch_types)].copy()
 
+    in_zone_whiffs = player_whiffs[player_whiffs["zone_split"] == "In Zone"]
+    out_zone_whiffs = player_whiffs[player_whiffs["zone_split"] == "Out of Zone"]
+
     selected_player_id = (
         int(player_whiffs["batter"].dropna().iloc[0])
         if not player_whiffs.empty else None
@@ -200,12 +208,22 @@ elif view == "Player Breakdown":
             headshot_url = f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{selected_player_id}/headshot/67/current"
             st.image(headshot_url, width=170)
 
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("Total Whiffs", len(player_whiffs))
+    metric2.metric("In-Zone Whiffs", len(in_zone_whiffs))
+    metric3.metric("Out-of-Zone Whiffs", len(out_zone_whiffs))
+    metric4.metric(
+        "Out-of-Zone Whiff %",
+        f"{(len(out_zone_whiffs) / len(player_whiffs) * 100):.1f}%" if len(player_whiffs) > 0 else "0.0%"
+    )
+
     st.dataframe(
         player_whiffs[
             [
                 "game_date",
                 "player_name",
                 "pitch_name",
+                "zone_split",
                 "miss_distance_inches"
             ]
         ]
@@ -214,6 +232,7 @@ elif view == "Player Breakdown":
                 "game_date": "Date",
                 "player_name": "Pitcher",
                 "pitch_name": "Pitch Type",
+                "zone_split": "Zone Split",
                 "miss_distance_inches": "Miss Distance (in)"
             }
         )
@@ -240,12 +259,13 @@ elif view == "Player Breakdown":
                 colorbar=dict(title="Miss (in)")
             ),
             customdata=player_whiffs[
-                ["player_name", "pitch_name", "game_date", "miss_distance_inches"]
+                ["player_name", "pitch_name", "game_date", "miss_distance_inches", "zone_split"]
             ],
             hovertemplate=(
                 "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
                 "Date: %{customdata[2]}<br>"
-                "Miss Distance: %{customdata[3]} in"
+                "Miss Distance: %{customdata[3]} in<br>"
+                "Zone Split: %{customdata[4]}"
                 "<extra></extra>"
             )
         )
@@ -275,5 +295,6 @@ elif view == "Player Breakdown":
     st.write(
         "Swings include fouls, balls in play, and swinging strikes; "
         "whiffs include swinging strikes and missed bunts. "
-        "Player Breakdown ranks whiffs by estimated distance from the strike zone."
+        "In-zone whiffs are misses on pitches inside the estimated strike zone, "
+        "while out-of-zone whiffs are misses on pitches outside it."
     )
