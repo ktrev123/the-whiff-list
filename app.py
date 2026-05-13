@@ -216,16 +216,24 @@ elif view == "Player Breakdown":
         key="selected_player_name"
     )
 
-    st.session_state.selected_player_name = selected_player
-
     player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
 
     pitch_type_options = sorted(player_whiffs["pitch_name"].dropna().unique())
 
+    if "selected_pitch_types" not in st.session_state:
+        st.session_state.selected_pitch_types = pitch_type_options
+
+    st.session_state.selected_pitch_types = [
+        p for p in st.session_state.selected_pitch_types if p in pitch_type_options
+    ]
+
+    if not st.session_state.selected_pitch_types:
+        st.session_state.selected_pitch_types = pitch_type_options
+
     selected_pitch_types = st.sidebar.multiselect(
         "Pitch Type",
         options=pitch_type_options,
-        default=pitch_type_options
+        key="selected_pitch_types"
     )
 
     if selected_pitch_types:
