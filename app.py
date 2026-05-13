@@ -210,12 +210,10 @@ elif view == "Player Breakdown":
     if st.session_state.selected_player_name not in player_options:
         st.session_state.selected_player_name = player_options[0]
 
-    default_index = player_options.index(st.session_state.selected_player_name)
-
     selected_player = st.sidebar.selectbox(
         "Player Breakdown",
         player_options,
-        index=default_index
+        key="selected_player_name"
     )
 
     st.session_state.selected_player_name = selected_player
