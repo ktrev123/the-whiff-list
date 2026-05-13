@@ -210,13 +210,25 @@ elif view == "Player Breakdown":
     if st.session_state.selected_player_name not in player_options:
         st.session_state.selected_player_name = player_options[0]
 
+    if "player_selectbox" not in st.session_state:
+        st.session_state.player_selectbox = st.session_state.selected_player_name
+
+    if st.session_state.player_selectbox not in player_options:
+        st.session_state.player_selectbox = st.session_state.selected_player_name
+
+    def sync_selected_player():
+        st.session_state.selected_player_name = st.session_state.player_selectbox
+
     selected_player = st.sidebar.selectbox(
         "Player Breakdown",
         player_options,
-        key="selected_player_name"
+        key="player_selectbox",
+        on_change=sync_selected_player
     )
 
-    player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
+    st.session_state.selected_player_name = selected_player
+
+    player_whiffs = pitch_data[pitch_data["batter_name"] == st.session_state.selected_player_name].copy()
 
     pitch_type_options = sorted(player_whiffs["pitch_name"].dropna().unique())
 
@@ -233,8 +245,11 @@ elif view == "Player Breakdown":
     selected_pitch_types = st.sidebar.multiselect(
         "Pitch Type",
         options=pitch_type_options,
-        key="selected_pitch_types"
+        default=st.session_state.selected_pitch_types,
+        key="pitch_type_multiselect"
     )
+
+    st.session_state.selected_pitch_types = selected_pitch_types
 
     if selected_pitch_types:
         player_whiffs = player_whiffs[player_whiffs["pitch_name"].isin(selected_pitch_types)].copy()
@@ -255,7 +270,7 @@ elif view == "Player Breakdown":
     text_col, image_col = st.columns([4, 1])
 
     with text_col:
-        st.markdown(f"### Player Breakdown: {selected_player}")
+        st.markdown(f"### Player Breakdown: {st.session_state.selected_player_name}")
         st.write("These are the worst swing-and-miss pitches ranked by Embarrassment Index.")
 
     with image_col:
@@ -354,7 +369,7 @@ elif view == "Player Breakdown":
     )
 
     fig.update_layout(
-        title=f"{selected_player} Whiff Locations",
+        title=f"{st.session_state.selected_player_name} Whiff Locations",
         xaxis_title="Horizontal Location (plate_x)",
         yaxis_title="Vertical Location (plate_z)",
         xaxis=dict(range=[-2.5, 2.5]),
