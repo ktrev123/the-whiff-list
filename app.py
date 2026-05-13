@@ -250,6 +250,14 @@ if st.session_state.selected_player_name not in player_options:
 
 
 
+if "pending_selected_player_name" in st.session_state:
+    pending_player = st.session_state.pending_selected_player_name
+    if pending_player in player_options:
+        st.session_state.selected_player_name = pending_player
+    del st.session_state["pending_selected_player_name"]
+
+
+
 selected_player = st.sidebar.selectbox(
     "Player Breakdown",
     player_options,
@@ -329,7 +337,8 @@ if view == "Leaderboard":
         selected_row_idx = selected_rows[0]
         selected_batter_name = leaderboard_display.iloc[selected_row_idx]["Batter"]
         if selected_batter_name in player_options and st.session_state.selected_player_name != selected_batter_name:
-            st.session_state.selected_player_name = selected_batter_name
+            st.session_state.pending_selected_player_name = selected_batter_name
+            st.rerun()
 
 
 
