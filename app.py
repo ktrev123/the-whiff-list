@@ -360,6 +360,42 @@ col3.metric("Minimum swings", min_swings)
 
 
 st.markdown("### Leaderboard")
+
+st.dataframe(
+    leaderboard_display[
+        ["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)", "Avg Embarrassment Index"]
+    ],
+    use_container_width=True,
+    hide_index=True
+)
+
+leaderboard_player_options = leaderboard_display["Batter"].tolist()
+
+selected_leaderboard_player = st.selectbox(
+    "Select a leaderboard player to view in Player Breakdown",
+    leaderboard_player_options,
+    index=leaderboard_player_options.index(st.session_state.selected_player_name)
+    if st.session_state.selected_player_name in leaderboard_player_options
+    else 0,
+    key="leaderboard_player_selector"
+)
+
+if st.button("Load player breakdown", key="load_leaderboard_player"):
+    st.session_state.selected_player_name = selected_leaderboard_player
+    st.rerun()
+
+selected_player = st.sidebar.selectbox(
+    "Player Breakdown",
+    player_options,
+    index=player_options.index(st.session_state.selected_player_name)
+)
+
+if selected_player != st.session_state.selected_player_name:
+    st.session_state.selected_player_name = selected_player
+
+selected_player = st.session_state.selected_player_name
+
+st.markdown("---")
 st.caption("Click Select for a player to update the breakdown below.")
 
 
