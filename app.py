@@ -183,8 +183,35 @@ if "selected_player_name" not in st.session_state:
 if st.session_state.selected_player_name not in player_options:
     st.session_state.selected_player_name = default_selected_player
 
+if "player_breakdown_selectbox" not in st.session_state:
+    st.session_state.player_breakdown_selectbox = st.session_state.selected_player_name
+
+if st.session_state.player_breakdown_selectbox not in player_options:
+    st.session_state.player_breakdown_selectbox = st.session_state.selected_player_name
+
+if "leaderboard_target_player" in st.session_state:
+    target_player = st.session_state.leaderboard_target_player
+    if target_player in player_options:
+        st.session_state.player_breakdown_selectbox = target_player
+        st.session_state.selected_player_name = target_player
+    del st.session_state["leaderboard_target_player"]
+
 if "selected_pitch_types_by_player" not in st.session_state:
     st.session_state.selected_pitch_types_by_player = {}
+
+
+def sync_selected_player():
+    st.session_state.selected_player_name = st.session_state.player_breakdown_selectbox
+
+
+selected_player = st.sidebar.selectbox(
+    "Player Breakdown",
+    player_options,
+    key="player_breakdown_selectbox",
+    on_change=sync_selected_player
+)
+
+selected_player = st.session_state.selected_player_name
 
 df_filtered = df[
     df["swings"] >= min_swings
@@ -216,40 +243,27 @@ col1.metric("Players shown", len(leaderboard_display))
 col2.metric("Season", season)
 col3.metric("Minimum swings", min_swings)
 
-selected_player = st.sidebar.selectbox(
-    "Player Breakdown",
-    player_options,
-    index=player_options.index(st.session_state.selected_player_name),
-    key="player_breakdown_selectbox"
-)
-
-if selected_player != st.session_state.selected_player_name:
-    st.session_state.selected_player_name = selected_player
-
 st.markdown("### Leaderboard")
 
-st.dataframe(
+selection_event = st.dataframe(
     leaderboard_display[
         ["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)", "Avg Embarrassment Index"]
     ],
     use_container_width=True,
-    hide_index=True
+    hide_index=True,
+    on_select="rerun",
+    selection_mode="single-row",
+    key="leaderboard_table"
 )
 
-leaderboard_player_options = leaderboard_display["Batter"].tolist()
+selected_rows = selection_event.selection.get("rows", [])
+if selected_rows:
+    selected_row_idx = selected_rows[0]
+    selected_batter_name = leaderboard_display.iloc[selected_row_idx]["Batter"]
 
-selected_leaderboard_player = st.selectbox(
-    "Select a leaderboard player to view in Player Breakdown",
-    leaderboard_player_options,
-    index=leaderboard_player_options.index(st.session_state.selected_player_name)
-    if st.session_state.selected_player_name in leaderboard_player_options
-    else 0,
-    key="leaderboard_player_selector"
-)
-
-if st.button("Load player breakdown", key="load_leaderboard_player"):
-    st.session_state.selected_player_name = selected_leaderboard_player
-    st.rerun()
+    if selected_batter_name in player_options and selected_batter_name != st.session_state.selected_player_name:
+        st.session_state.leaderboard_target_player = selected_batter_name
+        st.rerun()
 
 selected_player = st.session_state.selected_player_name
 
