@@ -11,6 +11,90 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+st.markdown("""
+<style>
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    max-width: 1400px;
+}
+
+h1, h2, h3 {
+    letter-spacing: -0.02em;
+}
+
+h1 {
+    font-weight: 800;
+}
+
+h3 {
+    margin-top: 0.35rem;
+    margin-bottom: 0.75rem;
+}
+
+div[data-testid="stMetric"] {
+    background: linear-gradient(180deg, rgba(20,24,31,0.95) 0%, rgba(12,15,20,0.95) 100%);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+}
+
+div[data-testid="stMetricLabel"] {
+    color: #aab4c3;
+    font-weight: 600;
+}
+
+div[data-testid="stMetricValue"] {
+    color: #f5f7fa;
+    font-weight: 800;
+}
+
+div[data-testid="stDataFrame"] {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+div[data-testid="stExpander"] {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.02);
+}
+
+section[data-testid="stSidebar"] {
+    border-right: 1px solid rgba(255,255,255,0.06);
+}
+
+.whiff-kicker {
+    display: inline-block;
+    padding: 0.35rem 0.65rem;
+    border-radius: 999px;
+    background: rgba(255, 75, 75, 0.14);
+    color: #ff6b6b;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    margin-bottom: 0.6rem;
+}
+
+.whiff-subtle {
+    color: #aab4c3;
+    font-size: 0.98rem;
+    margin-top: -0.25rem;
+    margin-bottom: 0.75rem;
+}
+
+hr {
+    margin-top: 2rem !important;
+    margin-bottom: 2rem !important;
+    border: none !important;
+    border-top: 1px solid rgba(255,255,255,0.08) !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 @st.cache_data
 def load_leaderboard_data():
@@ -56,13 +140,11 @@ def calculate_miss_distance(row):
     return np.sqrt((x_out ** 2) + (z_out ** 2))
 
 
+st.markdown('<div class="whiff-kicker">Swing-and-Miss Dashboard</div>', unsafe_allow_html=True)
 st.title("The Whiff List 💨")
-st.subheader("2025 MLB Swing-and-Miss Offenders")
-st.write(
-    """
-    An interactive Statcast dashboard built with Streamlit
-    to uncover the season's biggest swing-and-miss offenders.
-    """
+st.markdown(
+    '<div class="whiff-subtle">Tracking the ugliest chase whiffs, worst misses, and repeat flails from 2025 Statcast.</div>',
+    unsafe_allow_html=True
 )
 
 with st.expander("How the Embarrassment Index works", expanded=False):
@@ -118,33 +200,6 @@ with st.expander("How the Embarrassment Index works", expanded=False):
         - If the pitch is inside those bounds, miss distance is 0.
         - If the pitch is outside those bounds, the app measures the straight-line distance from the nearest edge of the strike zone.
         - That distance is converted from feet to inches and then capped at 18 inches for scoring.
-
-        **Example**
-        - Out-of-zone whiff
-        - 2 runners on base
-        - Previous pitch was also a swing-and-miss out of zone
-        - Miss distance = 14.4 inches
-        """
-    )
-
-    st.latex(r"""
-    D = 14.4 / 18 = 0.8,\quad Z = 1,\quad P = 1,\quad R = 2/3
-    """)
-
-    st.latex(r"""
-    EI = 100 \cdot \left(0.45(0.8) + 0.20(1) + 0.15(1) + 0.20(2/3)\right)
-    """)
-
-    st.latex(r"""
-    EI = 100 \cdot (0.36 + 0.20 + 0.15 + 0.1333) = 84.3
-    """)
-
-    st.markdown(
-        """
-        **How to read it**
-        - Lower scores usually come from in-zone misses or low-leverage situations.
-        - Mid-range scores usually reflect either a real chase or extra pressure.
-        - The highest scores usually combine a clear chase, runners on base, a prior out-of-zone whiff, and a large miss distance.
         """
     )
 
@@ -216,12 +271,6 @@ pitch_data["count"] = np.where(
     pitch_data["balls"].notna() & pitch_data["strikes"].notna(),
     pitch_data["balls"].astype("Int64").astype(str) + "-" + pitch_data["strikes"].astype("Int64").astype(str),
     "Unknown"
-)
-
-pitch_data["two_strikes"] = np.where(
-    pitch_data["strikes"].fillna(-1) == 2,
-    "Yes",
-    "No"
 )
 
 if all(col in pitch_data.columns for col in ["game_pk", "at_bat_number", "pitch_number"]):
@@ -374,7 +423,7 @@ leaderboard_display = df_filtered.rename(
         "swings": "Swings",
         "whiffs": "Whiffs",
         "whiff_rate_pct": "Whiff Rate (%)",
-        "avg_embarrassment_index": "Avg Embarrassment Index"
+        "avg_embarrassment_index": "Avg O-Zone Embarrassment"
     }
 )
 
@@ -383,11 +432,11 @@ col1.metric("Players shown", len(leaderboard_display))
 col2.metric("Season", season)
 col3.metric("Minimum swings", min_swings)
 
-st.markdown("### Leaderboard")
+st.markdown("### Chase Leaderboard")
 
 selection_event = st.dataframe(
     leaderboard_display[
-        ["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)", "Avg Embarrassment Index"]
+        ["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)", "Avg O-Zone Embarrassment"]
     ],
     use_container_width=True,
     hide_index=True,
@@ -407,7 +456,7 @@ if selected_rows:
 
 selected_player = st.session_state.selected_player_name
 
-st.markdown("### Most Embarrassing Swings in the Dataset")
+st.markdown("### Hall of Shame")
 
 most_embarrassing_swings = (
     pitch_data[pitch_data["zone_split"] == "Out of Zone"]
@@ -503,7 +552,7 @@ text_col, image_col = st.columns([4, 1])
 
 with text_col:
     st.markdown(f"### Player Breakdown: {selected_player}")
-    st.write("These are the worst swing-and-miss pitches ranked by Embarrassment Index.")
+    st.write("The ugliest whiffs for this hitter, ranked by Embarrassment Index.")
 
 with image_col:
     if selected_player_id:
@@ -519,50 +568,6 @@ metric4.metric(
     f"{player_whiffs['embarrassment_index'].mean():.1f}" if len(player_whiffs) > 0 else "0.0"
 )
 
-st.markdown("### Pitch Type Summary")
-if not player_whiffs.empty:
-    pitch_summary = (
-        player_whiffs.groupby("pitch_name", as_index=False)
-        .agg(
-            Whiffs=("pitch_name", "size"),
-            Avg_Embarrassment=("embarrassment_index", "mean"),
-            Avg_Miss_Distance_In=("miss_distance_inches", "mean"),
-            In_Zone_Whiffs=("zone_split", lambda x: (x == "In Zone").sum()),
-            Out_of_Zone_Whiffs=("zone_split", lambda x: (x == "Out of Zone").sum())
-        )
-        .rename(columns={"pitch_name": "Pitch Type"})
-    )
-
-    pitch_summary["Avg Embarrassment"] = pitch_summary["Avg_Embarrassment"].round(1)
-    pitch_summary["Avg Miss Distance (in)"] = pitch_summary["Avg_Miss_Distance_In"].round(1)
-    pitch_summary = pitch_summary.drop(columns=["Avg_Embarrassment", "Avg_Miss_Distance_In"])
-    pitch_summary = pitch_summary.sort_values(
-        ["Whiffs", "Avg Embarrassment"],
-        ascending=[False, False]
-    ).reset_index(drop=True)
-
-    st.dataframe(
-        pitch_summary[
-            [
-                "Pitch Type",
-                "Whiffs",
-                "Avg Embarrassment",
-                "Avg Miss Distance (in)",
-                "In_Zone_Whiffs",
-                "Out_of_Zone_Whiffs"
-            ]
-        ].rename(
-            columns={
-                "In_Zone_Whiffs": "In-Zone Whiffs",
-                "Out_of_Zone_Whiffs": "Out-of-Zone Whiffs"
-            }
-        ),
-        use_container_width=True,
-        hide_index=True
-    )
-else:
-    st.info("No pitch summary available for the selected pitch types.")
-
 st.markdown(f"### {selected_player}'s Top 10 Whiffs")
 st.dataframe(
     player_whiffs[
@@ -570,8 +575,6 @@ st.dataframe(
             "game_date",
             "player_name",
             "pitch_name",
-            "count",
-            "two_strikes",
             "zone_split",
             "runners_on",
             "prev_whiff_ozone",
@@ -584,8 +587,6 @@ st.dataframe(
             "game_date": "Date",
             "player_name": "Pitcher",
             "pitch_name": "Pitch Type",
-            "count": "Count",
-            "two_strikes": "Two Strikes",
             "zone_split": "Zone Split",
             "runners_on": "Runners On",
             "prev_whiff_ozone": "Prev Pitch O-Zone Whiff",
@@ -605,39 +606,39 @@ if not player_whiffs.empty:
     fig = go.Figure()
 
     fig.add_trace(
-    go.Scatter(
-        x=player_whiffs["plate_x"],
-        y=player_whiffs["plate_z"],
-        mode="markers",
-        marker=dict(
-            size=10,
-            color=player_whiffs["embarrassment_index"],
-            colorscale="Cividis",
-            cmin=0,
-            cmax=100,
-            showscale=True,
-            colorbar=dict(title="Embarrassment Index")
-        ),
-        customdata=player_whiffs[
-            [
-                "player_name",
-                "pitch_name",
-                "count",
-                "miss_distance_inches",
-                "runners_on",
-                "embarrassment_index"
-            ]
-        ],
-        hovertemplate=(
-            "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
-            "Count: %{customdata[2]}<br>"
-            "Miss Distance: %{customdata[3]} in<br>"
-            "Runners On: %{customdata[4]}<br>"
-            "Embarrassment Index: %{customdata[5]}"
-            "<extra></extra>"
+        go.Scatter(
+            x=player_whiffs["plate_x"],
+            y=player_whiffs["plate_z"],
+            mode="markers",
+            marker=dict(
+                size=10,
+                color=player_whiffs["embarrassment_index"],
+                colorscale="Cividis",
+                cmin=0,
+                cmax=100,
+                showscale=True,
+                colorbar=dict(title="Embarrassment Index")
+            ),
+            customdata=player_whiffs[
+                [
+                    "player_name",
+                    "pitch_name",
+                    "count",
+                    "miss_distance_inches",
+                    "runners_on",
+                    "embarrassment_index"
+                ]
+            ],
+            hovertemplate=(
+                "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
+                "Count: %{customdata[2]}<br>"
+                "Miss Distance: %{customdata[3]} in<br>"
+                "Runners On: %{customdata[4]}<br>"
+                "Embarrassment Index: %{customdata[5]}"
+                "<extra></extra>"
+            )
         )
     )
-)
 
     fig.add_shape(
         type="rect",
@@ -645,16 +646,32 @@ if not player_whiffs.empty:
         x1=0.708,
         y0=avg_bot,
         y1=avg_top,
-        line=dict(color="white", width=2)
+        line=dict(color="rgba(255,255,255,0.8)", width=2)
     )
 
     fig.update_layout(
-        title=f"{selected_player}'s Whiff Locations",
+        title=f"{selected_player} Whiff Locations",
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
         xaxis_title="Horizontal Location (plate_x)",
         yaxis_title="Vertical Location (plate_z)",
-        xaxis=dict(range=[-2.5, 2.5]),
-        yaxis=dict(range=[0, 5]),
-        height=600
+        xaxis=dict(
+            range=[-2.5, 2.5],
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.08)",
+            zeroline=False
+        ),
+        yaxis=dict(
+            range=[0, 5],
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.08)",
+            zeroline=False
+        ),
+        font=dict(color="#f5f7fa"),
+        title_font=dict(size=22),
+        height=600,
+        margin=dict(l=20, r=20, t=60, b=20)
     )
 
     st.plotly_chart(fig, use_container_width=True)
