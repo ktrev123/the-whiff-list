@@ -134,14 +134,14 @@ hr {
 
 @st.cache_data
 def load_leaderboard_data():
-    df = pd.read_csv("data/whiff_leaderboard_test.csv")
+    df = pd.read_csv("data/whiff_leaderboard_2025.csv")
     df["player_name"] = df["player_name"].str.title()
     return df
 
 
 @st.cache_data
 def load_pitch_data():
-    return pd.read_csv("data/statcast_test_2025_04_01_to_04_07.csv", low_memory=False)
+    return pd.read_parquet("data/statcast_2025.parquet")
 
 
 def last_first_to_first_last(name):
