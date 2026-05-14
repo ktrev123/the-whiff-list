@@ -297,10 +297,16 @@ pitch_data["embarrassment_index"] = (
     )
 ).round(1)
 
+pitch_data["embarrassment_index_ozone_only"] = np.where(
+    pitch_data["zone_split"] == "Out of Zone",
+    pitch_data["embarrassment_index"],
+    np.nan
+)
+
 avg_embarrassment = (
-    pitch_data.groupby("batter", as_index=False)["embarrassment_index"]
+    pitch_data.groupby("batter", as_index=False)["embarrassment_index_ozone_only"]
     .mean()
-    .rename(columns={"embarrassment_index": "avg_embarrassment_index"})
+    .rename(columns={"embarrassment_index_ozone_only": "avg_embarrassment_index"})
 )
 
 df = df.merge(avg_embarrassment, on="batter", how="left")
@@ -400,6 +406,51 @@ if selected_rows:
         st.rerun()
 
 selected_player = st.session_state.selected_player_name
+
+st.markdown("### Most Embarrassing Swings in the Dataset")
+
+most_embarrassing_swings = (
+    pitch_data[pitch_data["zone_split"] == "Out of Zone"]
+    .sort_values(
+        ["embarrassment_index", "miss_distance_inches", "runners_on"],
+        ascending=[False, False, False]
+    )
+    .copy()
+)
+
+st.dataframe(
+    most_embarrassing_swings[
+        [
+            "game_date",
+            "batter_name",
+            "player_name",
+            "pitch_name",
+            "count",
+            "two_strikes",
+            "runners_on",
+            "prev_whiff_ozone",
+            "miss_distance_inches",
+            "embarrassment_index"
+        ]
+    ]
+    .rename(
+        columns={
+            "game_date": "Date",
+            "batter_name": "Batter",
+            "player_name": "Pitcher",
+            "pitch_name": "Pitch Type",
+            "count": "Count",
+            "two_strikes": "Two Strikes",
+            "runners_on": "Runners On",
+            "prev_whiff_ozone": "Prev Pitch O-Zone Whiff",
+            "miss_distance_inches": "Miss Distance (in)",
+            "embarrassment_index": "Embarrassment Index"
+        }
+    )
+    .head(25),
+    use_container_width=True,
+    hide_index=True
+)
 
 st.markdown("---")
 
