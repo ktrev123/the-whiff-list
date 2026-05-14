@@ -13,6 +13,18 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+:root {
+    --whiff-navy: #0f172a;
+    --whiff-navy-2: #162033;
+    --whiff-cream: #f5efe3;
+    --whiff-cream-muted: #cbbfa8;
+    --whiff-red: #c24141;
+    --whiff-red-soft: rgba(194, 65, 65, 0.16);
+    --whiff-gold: #d4a937;
+    --whiff-border: rgba(245, 239, 227, 0.10);
+    --whiff-grid: rgba(245, 239, 227, 0.08);
+}
+
 .block-container {
     padding-top: 2rem;
     padding-bottom: 2rem;
@@ -25,72 +37,96 @@ h1, h2, h3 {
 
 h1 {
     font-weight: 800;
+    color: var(--whiff-cream);
 }
 
 h3 {
     margin-top: 0.35rem;
     margin-bottom: 0.75rem;
+    color: var(--whiff-cream);
 }
 
 div[data-testid="stMetric"] {
-    background: linear-gradient(180deg, rgba(20,24,31,0.95) 0%, rgba(12,15,20,0.95) 100%);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: linear-gradient(180deg, var(--whiff-navy-2) 0%, var(--whiff-navy) 100%);
+    border: 1px solid var(--whiff-border);
     border-radius: 16px;
     padding: 16px 18px;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+    box-shadow: 0 8px 22px rgba(0,0,0,0.22);
 }
 
 div[data-testid="stMetricLabel"] {
-    color: #aab4c3;
+    color: var(--whiff-cream-muted);
     font-weight: 600;
 }
 
 div[data-testid="stMetricValue"] {
-    color: #f5f7fa;
+    color: var(--whiff-cream);
     font-weight: 800;
 }
 
 div[data-testid="stDataFrame"] {
-    border: 1px solid rgba(255,255,255,0.08);
+    border: 1px solid var(--whiff-border);
     border-radius: 14px;
     overflow: hidden;
 }
 
 div[data-testid="stExpander"] {
-    border: 1px solid rgba(255,255,255,0.08);
+    border: 1px solid var(--whiff-border);
     border-radius: 14px;
     background: rgba(255,255,255,0.02);
 }
 
 section[data-testid="stSidebar"] {
-    border-right: 1px solid rgba(255,255,255,0.06);
+    border-right: 1px solid rgba(245, 239, 227, 0.08);
 }
 
 .whiff-kicker {
     display: inline-block;
     padding: 0.35rem 0.65rem;
     border-radius: 999px;
-    background: rgba(255, 75, 75, 0.14);
-    color: #ff6b6b;
+    background: var(--whiff-red-soft);
+    color: #f07a7a;
     font-size: 0.82rem;
     font-weight: 700;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
     margin-bottom: 0.6rem;
+    border: 1px solid rgba(240, 122, 122, 0.18);
 }
 
 .whiff-subtle {
-    color: #aab4c3;
+    color: var(--whiff-cream-muted);
     font-size: 0.98rem;
     margin-top: -0.25rem;
     margin-bottom: 0.75rem;
+}
+
+.whiff-divider {
+    height: 1px;
+    width: 100%;
+    background: linear-gradient(
+        90deg,
+        rgba(212,169,55,0) 0%,
+        rgba(212,169,55,0.55) 50%,
+        rgba(212,169,55,0) 100%
+    );
+    margin: 2rem 0 1.5rem 0;
+}
+
+.whiff-section-label {
+    color: var(--whiff-gold);
+    font-size: 0.86rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
 }
 
 hr {
     margin-top: 2rem !important;
     margin-bottom: 2rem !important;
     border: none !important;
-    border-top: 1px solid rgba(255,255,255,0.08) !important;
+    border-top: 1px solid rgba(245,239,227,0.08) !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -432,6 +468,7 @@ col1.metric("Players shown", len(leaderboard_display))
 col2.metric("Season", season)
 col3.metric("Minimum swings", min_swings)
 
+st.markdown('<div class="whiff-section-label">League view</div>', unsafe_allow_html=True)
 st.markdown("### Chase Leaderboard")
 
 selection_event = st.dataframe(
@@ -456,6 +493,7 @@ if selected_rows:
 
 selected_player = st.session_state.selected_player_name
 
+st.markdown('<div class="whiff-section-label">Worst swings</div>', unsafe_allow_html=True)
 st.markdown("### Hall of Shame")
 
 most_embarrassing_swings = (
@@ -501,7 +539,7 @@ st.dataframe(
     hide_index=True
 )
 
-st.markdown("---")
+st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
 
 player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
 
@@ -568,6 +606,7 @@ metric4.metric(
     f"{player_whiffs['embarrassment_index'].mean():.1f}" if len(player_whiffs) > 0 else "0.0"
 )
 
+st.markdown('<div class="whiff-section-label">Player view</div>', unsafe_allow_html=True)
 st.markdown(f"### {selected_player}'s Top 10 Whiffs")
 st.dataframe(
     player_whiffs[
@@ -646,33 +685,33 @@ if not player_whiffs.empty:
         x1=0.708,
         y0=avg_bot,
         y1=avg_top,
-        line=dict(color="rgba(255,255,255,0.8)", width=2)
+        line=dict(color="rgba(245,239,227,0.85)", width=2)
     )
 
     fig.update_layout(
-        title=f"{selected_player} Whiff Locations",
-        template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis_title="Horizontal Location (plate_x)",
-        yaxis_title="Vertical Location (plate_z)",
-        xaxis=dict(
-            range=[-2.5, 2.5],
-            showgrid=True,
-            gridcolor="rgba(255,255,255,0.08)",
-            zeroline=False
-        ),
-        yaxis=dict(
-            range=[0, 5],
-            showgrid=True,
-            gridcolor="rgba(255,255,255,0.08)",
-            zeroline=False
-        ),
-        font=dict(color="#f5f7fa"),
-        title_font=dict(size=22),
-        height=600,
-        margin=dict(l=20, r=20, t=60, b=20)
-    )
+    title=f"{selected_player} Whiff Locations",
+    template="plotly_dark",
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    xaxis_title="Horizontal Location (plate_x)",
+    yaxis_title="Vertical Location (plate_z)",
+    xaxis=dict(
+        range=[-2.5, 2.5],
+        showgrid=True,
+        gridcolor="rgba(245,239,227,0.08)",
+        zeroline=False
+    ),
+    yaxis=dict(
+        range=[0, 5],
+        showgrid=True,
+        gridcolor="rgba(245,239,227,0.08)",
+        zeroline=False
+    ),
+    font=dict(color="#f5efe3"),
+    title_font=dict(size=22, color="#f5efe3"),
+    height=600,
+    margin=dict(l=20, r=20, t=60, b=20)
+)
 
     st.plotly_chart(fig, use_container_width=True)
 else:
