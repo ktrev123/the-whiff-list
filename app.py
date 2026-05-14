@@ -68,85 +68,83 @@ st.write(
 with st.expander("How the Embarrassment Index works", expanded=False):
     st.markdown(
         """
-        The **Embarrassment Index** is a custom pitch-level score for ranking the worst swing-and-miss events.
+        The **Embarrassment Index** is a custom 0-100 pitch-level score where higher values represent more embarrassing swing-and-miss events.
 
-        It combines four ideas:
-        - Did the batter miss a pitch **outside** the strike zone?
-        - Were there runners on base?
-        - Was the **previous pitch** in the same at-bat also a whiff?
-        - How far did the pitch finish from the strike zone?
+        The score combines four ideas:
+        - How far the whiff finished outside the strike zone
+        - Whether the whiff was out of the zone at all
+        - Whether the previous pitch in the same at-bat was also a swing-and-miss out of the zone
+        - How many runners were on base
 
-        Every whiff starts with a base score of 10.
+        Every pitch is scored on a bounded scale so a pitch that is only barely off the plate is not punished too harshly.
         """
     )
 
     st.markdown("**Formula**")
     st.latex(r"""
-    EI = 10 + Z + R + P + D
+    EI = 100 \cdot \left(0.45D + 0.20Z + 0.15P + 0.20R\right)
     """)
 
-    st.markdown("where")
+    st.markdown("**Components**")
+
+    st.latex(r"""
+    D = \min\left(\frac{\text{miss distance in inches}}{18}, 1\right)
+    """)
 
     st.latex(r"""
     Z =
     \begin{cases}
-    10, & \text{if the whiff was out of zone} \\
+    1, & \text{if the whiff was out of zone} \\
     0, & \text{if the whiff was in zone}
     \end{cases}
     """)
 
     st.latex(r"""
-    R = 6 \cdot (\text{runners on base})
-    """)
-
-    st.latex(r"""
     P =
     \begin{cases}
-    10, & \text{if the previous pitch in the at-bat was also a whiff} \\
+    1, & \text{if the previous pitch was also a swing-and-miss out of zone} \\
     0, & \text{otherwise}
     \end{cases}
     """)
 
     st.latex(r"""
-    D = 1.25 \cdot (\text{miss distance in inches})
+    R = \frac{\text{runners on base}}{3}
     """)
 
     st.markdown(
         """
         **Strike-zone logic**
-        - The pitch is **in zone** when `plate_x` is between -0.708 and 0.708 feet, and `plate_z` is between `sz_bot` and `sz_top`.
+        - The pitch is in zone when `plate_x` is between -0.708 and 0.708 feet, and `plate_z` is between `sz_bot` and `sz_top`.
         - If the pitch is inside those bounds, miss distance is 0.
         - If the pitch is outside those bounds, the app measures the straight-line distance from the nearest edge of the strike zone.
-        - That distance is converted from feet to inches and used in the formula.
-        """
-    )
+        - That distance is converted from feet to inches and then capped at 18 inches for scoring.
 
-    st.markdown("**Example**")
-
-    st.markdown(
-        """
-        Suppose a whiff has:
-        - Out-of-zone miss
+        **Example**
+        - Out-of-zone whiff
         - 2 runners on base
-        - Previous pitch was also a whiff
-        - Miss distance of 14.4 inches
+        - Previous pitch was also a swing-and-miss out of zone
+        - Miss distance = 14.4 inches
         """
     )
 
     st.latex(r"""
-    EI = 10 + 10 + (6 \cdot 2) + 10 + (1.25 \cdot 14.4)
+    D = 14.4 / 18 = 0.8,\quad Z = 1,\quad P = 1,\quad R = 2/3
     """)
 
     st.latex(r"""
-    EI = 10 + 10 + 12 + 10 + 18.0 = 60.0
+    EI = 100 \cdot \left(0.45(0.8) + 0.20(1) + 0.15(1) + 0.20(2/3)\right)
+    """)
+
+    st.latex(r"""
+    EI = 100 \cdot (0.36 + 0.20 + 0.15 + 0.1333) = 84.3
     """)
 
     st.markdown(
         """
         **How to read it**
-        - Lower scores usually come from in-zone misses with empty bases.
-        - Middle scores usually come from either chase swings or higher-leverage situations.
-        - Highest scores usually combine a chase, runners on base, a prior whiff in the same at-bat, and a large miss distance.
+        - Lower scores usually come from in-zone misses or low-leverage situations.
+        - Mid-range scores usually reflect either a real chase or extra pressure.
+        - The highest scores usually combine a clear chase, runners on base, a prior out-of-zone whiff, and a large miss distance.
         """
     )
 
@@ -231,21 +229,72 @@ if all(col in pitch_data.columns for col in ["game_pk", "at_bat_number", "pitch_
         ["game_pk", "at_bat_number", "pitch_number"]
     ).copy()
 
-    pitch_data["prev_whiff"] = (
-        pitch_data.groupby(["game_pk", "at_bat_number"])["description"]
-        .shift(1)
-        .isin(whiff_descriptions)
-        .astype(int)
+    pitch_data["prev_description"] = (
+        pitch_data.groupby(["game_pk", "at_bat_number"])["description"].shift(1)
+    )
+    pitch_data["prev_plate_x"] = (
+        pitch_data.groupby(["game_pk", "at_bat_number"])["plate_x"].shift(1)
+    )
+    pitch_data["prev_plate_z"] = (
+        pitch_data.groupby(["game_pk", "at_bat_number"])["plate_z"].shift(1)
+    )
+    pitch_data["prev_sz_top"] = (
+        pitch_data.groupby(["game_pk", "at_bat_number"])["sz_top"].shift(1)
+    )
+    pitch_data["prev_sz_bot"] = (
+        pitch_data.groupby(["game_pk", "at_bat_number"])["sz_bot"].shift(1)
+    )
+
+    prev_left_edge = -0.708
+    prev_right_edge = 0.708
+
+    prev_x_out = np.where(
+        pitch_data["prev_plate_x"] < prev_left_edge,
+        prev_left_edge - pitch_data["prev_plate_x"],
+        np.where(
+            pitch_data["prev_plate_x"] > prev_right_edge,
+            pitch_data["prev_plate_x"] - prev_right_edge,
+            0
+        )
+    )
+
+    prev_z_out = np.where(
+        pitch_data["prev_plate_z"] < pitch_data["prev_sz_bot"],
+        pitch_data["prev_sz_bot"] - pitch_data["prev_plate_z"],
+        np.where(
+            pitch_data["prev_plate_z"] > pitch_data["prev_sz_top"],
+            pitch_data["prev_plate_z"] - pitch_data["prev_sz_top"],
+            0
+        )
+    )
+
+    pitch_data["prev_miss_distance"] = np.sqrt((prev_x_out ** 2) + (prev_z_out ** 2))
+    pitch_data["prev_zone_split"] = np.where(
+        pitch_data["prev_miss_distance"] == 0,
+        "In Zone",
+        "Out of Zone"
+    )
+    pitch_data["prev_whiff_ozone"] = np.where(
+        pitch_data["prev_description"].isin(whiff_descriptions) &
+        (pitch_data["prev_zone_split"] == "Out of Zone"),
+        1,
+        0
     )
 else:
-    pitch_data["prev_whiff"] = 0
+    pitch_data["prev_whiff_ozone"] = 0
+
+pitch_data["distance_score"] = np.minimum(pitch_data["miss_distance_inches"] / 18, 1.0)
+pitch_data["zone_score"] = np.where(pitch_data["zone_split"] == "Out of Zone", 1.0, 0.0)
+pitch_data["prev_whiff_score"] = pitch_data["prev_whiff_ozone"].astype(float)
+pitch_data["runners_score"] = pitch_data["runners_on"] / 3.0
 
 pitch_data["embarrassment_index"] = (
-    10
-    + np.where(pitch_data["zone_split"] == "Out of Zone", 10, 0)
-    + (pitch_data["runners_on"] * 6)
-    + np.where(pitch_data["prev_whiff"] == 1, 10, 0)
-    + (pitch_data["miss_distance_inches"] * 1.25)
+    100 * (
+        0.45 * pitch_data["distance_score"] +
+        0.20 * pitch_data["zone_score"] +
+        0.15 * pitch_data["prev_whiff_score"] +
+        0.20 * pitch_data["runners_score"]
+    )
 ).round(1)
 
 avg_embarrassment = (
@@ -474,7 +523,7 @@ st.dataframe(
             "two_strikes",
             "zone_split",
             "runners_on",
-            "prev_whiff",
+            "prev_whiff_ozone",
             "miss_distance_inches",
             "embarrassment_index"
         ]
@@ -488,7 +537,7 @@ st.dataframe(
             "two_strikes": "Two Strikes",
             "zone_split": "Zone Split",
             "runners_on": "Runners On",
-            "prev_whiff": "Prev Pitch Whiff",
+            "prev_whiff_ozone": "Prev Pitch O-Zone Whiff",
             "miss_distance_inches": "Miss Distance (in)",
             "embarrassment_index": "Embarrassment Index"
         }
@@ -513,6 +562,8 @@ if not player_whiffs.empty:
                 size=10,
                 color=player_whiffs["embarrassment_index"],
                 colorscale="Reds",
+                cmin=0,
+                cmax=100,
                 showscale=True,
                 colorbar=dict(title="Embarrassment Index")
             ),
@@ -526,7 +577,7 @@ if not player_whiffs.empty:
                     "miss_distance_inches",
                     "zone_split",
                     "runners_on",
-                    "prev_whiff",
+                    "prev_whiff_ozone",
                     "embarrassment_index"
                 ]
             ],
@@ -538,7 +589,7 @@ if not player_whiffs.empty:
                 "Miss Distance: %{customdata[5]} in<br>"
                 "Zone Split: %{customdata[6]}<br>"
                 "Runners On: %{customdata[7]}<br>"
-                "Prev Pitch Whiff: %{customdata[8]}<br>"
+                "Prev Pitch O-Zone Whiff: %{customdata[8]}<br>"
                 "Embarrassment Index: %{customdata[9]}"
                 "<extra></extra>"
             )
@@ -569,7 +620,6 @@ else:
 
 st.markdown("### Notes")
 st.write(
-    "Embarrassment Index is a custom score that increases for out-of-zone whiffs, "
-    "more runners on base, consecutive whiffs within the same at-bat, "
-    "and larger miss distance from the strike zone."
+    "Embarrassment Index is a custom 0-100 score that increases with larger out-of-zone miss distance, "
+    "out-of-zone whiffs, runners on base, and repeated out-of-zone swing-and-miss behavior within the same at-bat."
 )
