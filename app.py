@@ -7,12 +7,14 @@ import plotly.graph_objects as go
 
 
 
+
 st.set_page_config(
     page_title="The Whiff List",
     page_icon="💨",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
 
 
 
@@ -28,9 +30,11 @@ def load_leaderboard_data():
 
 
 
+
 @st.cache_data
 def load_pitch_data():
     return pd.read_csv("data/statcast_test_2025_04_01_to_04_07.csv", low_memory=False)
+
 
 
 
@@ -41,6 +45,7 @@ def last_first_to_first_last(name):
         parts = [part.strip() for part in name.split(",", 1)]
         return f"{parts[1]} {parts[0]}"
     return name
+
 
 
 
@@ -57,12 +62,14 @@ def calculate_miss_distance(row):
 
 
 
+
     if x < left_edge:
         x_out = left_edge - x
     elif x > right_edge:
         x_out = x - right_edge
     else:
         x_out = 0
+
 
 
 
@@ -77,7 +84,9 @@ def calculate_miss_distance(row):
 
 
 
+
     return np.sqrt((x_out ** 2) + (z_out ** 2))
+
 
 
 
@@ -95,7 +104,9 @@ st.write(
 
 
 
+
 st.sidebar.header("Filters")
+
 
 
 
@@ -105,6 +116,7 @@ season = st.sidebar.selectbox(
     options=[2025],
     index=0
 )
+
 
 
 
@@ -120,8 +132,10 @@ min_swings = st.sidebar.slider(
 
 
 
+
 df = load_leaderboard_data().copy()
 pitch_data = load_pitch_data().copy()
+
 
 
 
@@ -135,8 +149,10 @@ whiff_descriptions = {
 
 
 
+
 pitch_data = pitch_data[pitch_data["description"].isin(whiff_descriptions)].copy()
 pitch_data = pitch_data.dropna(subset=["batter", "plate_x", "plate_z", "sz_top", "sz_bot"])
+
 
 
 
@@ -150,7 +166,9 @@ name_lookup = (
 
 
 
+
 pitch_data = pitch_data.merge(name_lookup, on="batter", how="left")
+
 
 
 
@@ -166,6 +184,7 @@ pitch_data["zone_split"] = np.where(
 
 
 
+
 pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
 pitch_data["player_name"] = pitch_data["player_name"].str.title()
 pitch_data["player_name"] = pitch_data["player_name"].apply(last_first_to_first_last)
@@ -173,9 +192,11 @@ pitch_data["player_name"] = pitch_data["player_name"].apply(last_first_to_first_
 
 
 
+
 for base_col in ["on_1b", "on_2b", "on_3b"]:
     if base_col not in pitch_data.columns:
         pitch_data[base_col] = np.nan
+
 
 
 
@@ -189,12 +210,15 @@ pitch_data["runners_on"] = (
 
 
 
+
 if "balls" not in pitch_data.columns:
     pitch_data["balls"] = np.nan
 
 
+
 if "strikes" not in pitch_data.columns:
     pitch_data["strikes"] = np.nan
+
 
 
 pitch_data["count"] = np.where(
@@ -202,6 +226,7 @@ pitch_data["count"] = np.where(
     pitch_data["balls"].astype("Int64").astype(str) + "-" + pitch_data["strikes"].astype("Int64").astype(str),
     "Unknown"
 )
+
 
 
 pitch_data["two_strikes"] = np.where(
@@ -213,10 +238,12 @@ pitch_data["two_strikes"] = np.where(
 
 
 
+
 if all(col in pitch_data.columns for col in ["game_pk", "at_bat_number", "pitch_number"]):
     pitch_data = pitch_data.sort_values(
         ["game_pk", "at_bat_number", "pitch_number"]
     ).copy()
+
 
 
 
@@ -233,6 +260,7 @@ else:
 
 
 
+
 pitch_data["embarrassment_index"] = (
     10
     + np.where(pitch_data["zone_split"] == "Out of Zone", 10, 0)
@@ -240,6 +268,7 @@ pitch_data["embarrassment_index"] = (
     + np.where(pitch_data["prev_whiff"] == 1, 10, 0)
     + (pitch_data["miss_distance_inches"] * 1.25)
 ).round(1)
+
 
 
 
@@ -253,8 +282,10 @@ avg_embarrassment = (
 
 
 
+
 df = df.merge(avg_embarrassment, on="batter", how="left")
 df["avg_embarrassment_index"] = df["avg_embarrassment_index"].round(1)
+
 
 
 
@@ -269,53 +300,31 @@ if "selected_player_name" not in st.session_state:
 if st.session_state.selected_player_name not in player_options:
     st.session_state.selected_player_name = default_selected_player
 
-if "player_breakdown_widget" not in st.session_state:
-    st.session_state.player_breakdown_widget = st.session_state.selected_player_name
-
-if st.session_state.player_breakdown_widget not in player_options:
-    st.session_state.player_breakdown_widget = st.session_state.selected_player_name
-
-if "leaderboard_selected_player" in st.session_state:
-    leaderboard_player = st.session_state.leaderboard_selected_player
-    if (
-        leaderboard_player in player_options
-        and leaderboard_player != st.session_state.player_breakdown_widget
-    ):
-        st.session_state.player_breakdown_widget = leaderboard_player
-        st.session_state.selected_player_name = leaderboard_player
-    del st.session_state["leaderboard_selected_player"]
-
-
-def sync_player_dropdown():
-    st.session_state.selected_player_name = st.session_state.player_breakdown_widget
-
-
-selected_player = st.sidebar.selectbox(
-    "Player Breakdown",
-    player_options,
-    key="player_breakdown_widget",
-    on_change=sync_player_dropdown
-)
-
-selected_player = st.session_state.selected_player_name
-
-
 if "selected_pitch_types_by_player" not in st.session_state:
     st.session_state.selected_pitch_types_by_player = {}
+
+if "leaderboard_button_click" not in st.session_state:
+    st.session_state.leaderboard_button_click = None
+
+
 
 
 df_filtered = df[
     df["swings"] >= min_swings
 ].copy()
 
+
 df_filtered["whiff_rate_pct"] = (df_filtered["whiff_rate"] * 100).round(1)
+
 
 df_filtered = df_filtered.sort_values(
     ["avg_embarrassment_index", "whiff_rate", "whiffs"],
     ascending=[False, False, False]
 ).reset_index(drop=True)
 
+
 df_filtered["rank_display"] = df_filtered.index + 1
+
 
 leaderboard_display = df_filtered.rename(
     columns={
@@ -329,41 +338,62 @@ leaderboard_display = df_filtered.rename(
     }
 )
 
+
+selected_player = st.sidebar.selectbox(
+    "Player Breakdown",
+    player_options,
+    index=player_options.index(st.session_state.selected_player_name)
+)
+
+if selected_player != st.session_state.selected_player_name:
+    st.session_state.selected_player_name = selected_player
+
+selected_player = st.session_state.selected_player_name
+
+
+
+
 col1, col2, col3 = st.columns(3)
 col1.metric("Players shown", len(leaderboard_display))
 col2.metric("Season", season)
 col3.metric("Minimum swings", min_swings)
 
+
 st.markdown("### Leaderboard")
-st.caption("Select a row to update the player breakdown below.")
+st.caption("Click Select for a player to update the breakdown below.")
 
-selection_event = st.dataframe(
-    leaderboard_display[
-        ["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)", "Avg Embarrassment Index"]
-    ],
-    use_container_width=True,
-    hide_index=True,
-    on_select="rerun",
-    selection_mode="single-row",
-    key="leaderboard_table"
-)
 
-selected_rows = selection_event.selection.get("rows", [])
-if selected_rows:
-    selected_row_idx = selected_rows[0]
-    selected_batter_name = leaderboard_display.iloc[selected_row_idx]["Batter"]
+header_cols = st.columns([0.8, 0.8, 3, 1, 1, 1, 1.3, 1.5])
+header_cols[0].markdown("**Select**")
+header_cols[1].markdown("**Rank**")
+header_cols[2].markdown("**Batter**")
+header_cols[3].markdown("**AB**")
+header_cols[4].markdown("**Swings**")
+header_cols[5].markdown("**Whiffs**")
+header_cols[6].markdown("**Whiff Rate (%)**")
+header_cols[7].markdown("**Avg Emb. Index**")
 
-    if (
-        selected_batter_name in player_options
-        and selected_batter_name != st.session_state.selected_player_name
-    ):
-        st.session_state.leaderboard_selected_player = selected_batter_name
+for i, row in leaderboard_display[
+    ["Rank", "Batter", "AB", "Swings", "Whiffs", "Whiff Rate (%)", "Avg Embarrassment Index"]
+].iterrows():
+    row_cols = st.columns([0.8, 0.8, 3, 1, 1, 1, 1.3, 1.5])
+
+    if row_cols[0].button("Select", key=f"select_player_{i}"):
+        st.session_state.selected_player_name = row["Batter"]
         st.rerun()
 
-selected_player = st.session_state.selected_player_name
+    row_cols[1].write(row["Rank"])
+    row_cols[2].write(row["Batter"])
+    row_cols[3].write(row["AB"])
+    row_cols[4].write(row["Swings"])
+    row_cols[5].write(row["Whiffs"])
+    row_cols[6].write(row["Whiff Rate (%)"])
+    row_cols[7].write(row["Avg Embarrassment Index"])
+
 
 
 st.markdown("---")
+
 
 
 player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
@@ -371,7 +401,9 @@ player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
 
 
 
+
 pitch_type_options = sorted(player_whiffs["pitch_name"].dropna().unique())
+
 
 
 
@@ -382,6 +414,7 @@ valid_saved_pitch_types = (
     if saved_pitch_types is not None
     else pitch_type_options.copy()
 )
+
 
 
 
@@ -402,7 +435,9 @@ selected_pitch_types = st.sidebar.multiselect(
 
 
 
+
 st.session_state.selected_pitch_types_by_player[selected_player] = selected_pitch_types
+
 
 
 
@@ -415,6 +450,7 @@ else:
 
 
 
+
 player_whiffs = player_whiffs.sort_values(
     ["embarrassment_index", "miss_distance"],
     ascending=[False, False]
@@ -423,8 +459,10 @@ player_whiffs = player_whiffs.sort_values(
 
 
 
+
 in_zone_whiffs = player_whiffs[player_whiffs["zone_split"] == "In Zone"]
 out_zone_whiffs = player_whiffs[player_whiffs["zone_split"] == "Out of Zone"]
+
 
 
 
@@ -441,7 +479,9 @@ selected_player_id = (
 
 
 
+
 text_col, image_col = st.columns([4, 1])
+
 
 
 
@@ -449,6 +489,7 @@ text_col, image_col = st.columns([4, 1])
 with text_col:
     st.markdown(f"### Player Breakdown: {selected_player}")
     st.write("These are the worst swing-and-miss pitches ranked by Embarrassment Index.")
+
 
 
 
@@ -461,6 +502,7 @@ with image_col:
 
 
 
+
 metric1, metric2, metric3, metric4 = st.columns(4)
 metric1.metric("Total Whiffs", len(player_whiffs))
 metric2.metric("In-Zone Whiffs", len(in_zone_whiffs))
@@ -469,6 +511,7 @@ metric4.metric(
     "Avg Embarrassment",
     f"{player_whiffs['embarrassment_index'].mean():.1f}" if len(player_whiffs) > 0 else "0.0"
 )
+
 
 
 
@@ -488,6 +531,7 @@ if not player_whiffs.empty:
     )
 
 
+
     pitch_summary["Avg Embarrassment"] = pitch_summary["Avg_Embarrassment"].round(1)
     pitch_summary["Avg Miss Distance (in)"] = pitch_summary["Avg_Miss_Distance_In"].round(1)
     pitch_summary = pitch_summary.drop(columns=["Avg_Embarrassment", "Avg_Miss_Distance_In"])
@@ -495,6 +539,7 @@ if not player_whiffs.empty:
         ["Whiffs", "Avg Embarrassment"],
         ascending=[False, False]
     ).reset_index(drop=True)
+
 
 
     st.dataframe(
@@ -518,6 +563,7 @@ if not player_whiffs.empty:
     )
 else:
     st.info("No pitch summary available for the selected pitch types.")
+
 
 
 
@@ -560,6 +606,7 @@ st.dataframe(
 
 
 
+
 if not player_whiffs.empty:
     avg_top = player_whiffs["sz_top"].mean()
     avg_bot = player_whiffs["sz_bot"].mean()
@@ -567,7 +614,9 @@ if not player_whiffs.empty:
 
 
 
+
     fig = go.Figure()
+
 
 
 
@@ -616,6 +665,7 @@ if not player_whiffs.empty:
 
 
 
+
     fig.add_shape(
         type="rect",
         x0=-0.708,
@@ -624,6 +674,7 @@ if not player_whiffs.empty:
         y1=avg_top,
         line=dict(color="white", width=2)
     )
+
 
 
 
@@ -640,9 +691,11 @@ if not player_whiffs.empty:
 
 
 
+
     st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("No whiffs found for the selected pitch types.")
+
 
 
 
