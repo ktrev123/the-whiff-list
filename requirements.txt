@@ -2,3 +2,4 @@ streamlit==1.45.1
 pandas==2.2.3
 pybaseball==2.2.7
 plotly==6.0.0
+pyarrow==18.1.0
