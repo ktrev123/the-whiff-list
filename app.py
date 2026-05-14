@@ -176,7 +176,6 @@ def calculate_miss_distance(row):
     return np.sqrt((x_out ** 2) + (z_out ** 2))
 
 
-st.markdown('<div class="whiff-kicker">Swing-and-Miss Dashboard</div>', unsafe_allow_html=True)
 st.title("The Whiff List 💨")
 st.markdown(
     '<div class="whiff-subtle">Tracking the ugliest chase whiffs, worst misses, and repeat flails from 2025 Statcast.</div>',
