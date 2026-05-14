@@ -258,7 +258,6 @@ df["avg_embarrassment_index"] = df["avg_embarrassment_index"].round(1)
 
 
 
-
 player_options = sorted(pitch_data["batter_name"].dropna().unique())
 
 default_player_name = "Shohei Ohtani"
@@ -270,39 +269,53 @@ if "selected_player_name" not in st.session_state:
 if st.session_state.selected_player_name not in player_options:
     st.session_state.selected_player_name = default_selected_player
 
+if "player_breakdown_widget" not in st.session_state:
+    st.session_state.player_breakdown_widget = st.session_state.selected_player_name
 
+if st.session_state.player_breakdown_widget not in player_options:
+    st.session_state.player_breakdown_widget = st.session_state.selected_player_name
+
+if "leaderboard_selected_player" in st.session_state:
+    leaderboard_player = st.session_state.leaderboard_selected_player
+    if (
+        leaderboard_player in player_options
+        and leaderboard_player != st.session_state.player_breakdown_widget
+    ):
+        st.session_state.player_breakdown_widget = leaderboard_player
+        st.session_state.selected_player_name = leaderboard_player
+    del st.session_state["leaderboard_selected_player"]
+
+
+def sync_player_dropdown():
+    st.session_state.selected_player_name = st.session_state.player_breakdown_widget
+
+
+selected_player = st.sidebar.selectbox(
+    "Player Breakdown",
+    player_options,
+    key="player_breakdown_widget",
+    on_change=sync_player_dropdown
+)
+
+selected_player = st.session_state.selected_player_name
 
 
 if "selected_pitch_types_by_player" not in st.session_state:
     st.session_state.selected_pitch_types_by_player = {}
 
 
-
-
 df_filtered = df[
     df["swings"] >= min_swings
 ].copy()
 
-
-
-
 df_filtered["whiff_rate_pct"] = (df_filtered["whiff_rate"] * 100).round(1)
-
-
-
 
 df_filtered = df_filtered.sort_values(
     ["avg_embarrassment_index", "whiff_rate", "whiffs"],
     ascending=[False, False, False]
 ).reset_index(drop=True)
 
-
-
-
 df_filtered["rank_display"] = df_filtered.index + 1
-
-
-
 
 leaderboard_display = df_filtered.rename(
     columns={
@@ -316,27 +329,10 @@ leaderboard_display = df_filtered.rename(
     }
 )
 
-
-
-
-selected_player = st.sidebar.selectbox(
-    "Player Breakdown",
-    player_options,
-    index=player_options.index(st.session_state.selected_player_name)
-)
-
-st.session_state.selected_player_name = selected_player
-
-
-
-
 col1, col2, col3 = st.columns(3)
 col1.metric("Players shown", len(leaderboard_display))
 col2.metric("Season", season)
 col3.metric("Minimum swings", min_swings)
-
-
-
 
 st.markdown("### Leaderboard")
 st.caption("Select a row to update the player breakdown below.")
@@ -361,17 +357,13 @@ if selected_rows:
         selected_batter_name in player_options
         and selected_batter_name != st.session_state.selected_player_name
     ):
-        st.session_state.selected_player_name = selected_batter_name
+        st.session_state.leaderboard_selected_player = selected_batter_name
         st.rerun()
 
 selected_player = st.session_state.selected_player_name
 
 
-
-
 st.markdown("---")
-
-
 
 
 player_whiffs = pitch_data[pitch_data["batter_name"] == selected_player].copy()
