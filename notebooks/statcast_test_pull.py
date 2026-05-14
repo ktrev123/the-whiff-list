@@ -2,9 +2,12 @@ import os
 import pandas as pd
 from pybaseball import statcast, cache
 
+
 cache.enable()
 
+
 os.makedirs("data/raw_parquet", exist_ok=True)
+
 
 date_ranges = [
     ("2025-03-01", "2025-03-31"),
@@ -16,6 +19,7 @@ date_ranges = [
     ("2025-09-01", "2025-09-30"),
     ("2025-10-01", "2025-10-31"),
 ]
+
 
 keep_cols = [
     "game_date",
@@ -46,7 +50,9 @@ keep_cols = [
     "away_team",
 ]
 
+
 all_parts = []
+
 
 for start_date, end_date in date_ranges:
     out_file = f"data/raw_parquet/statcast_{start_date}_to_{end_date}.parquet"
@@ -63,6 +69,8 @@ for start_date, end_date in date_ranges:
 
         if "game_date" in month_df.columns:
             month_df["game_date"] = pd.to_datetime(month_df["game_date"])
+            # HARD CUTOFF: drop anything before 2025-03-25
+            month_df = month_df[month_df["game_date"] >= pd.Timestamp("2025-03-25")].copy()
 
         int_cols = [
             "game_pk", "at_bat_number", "pitch_number", "batter", "pitcher",
@@ -94,6 +102,7 @@ for start_date, end_date in date_ranges:
         print(f"Saved {len(month_df):,} rows to {out_file}")
 
     all_parts.append(month_df)
+
 
 season_df = pd.concat(all_parts, ignore_index=True).drop_duplicates()
 season_df = season_df.sort_values(["game_date", "game_pk", "at_bat_number", "pitch_number"])
