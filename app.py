@@ -65,66 +65,88 @@ st.write(
     """
 )
 
-with st.expander("How the Embarrassment Index works", expanded=True):
+with st.expander("How the Embarrassment Index works", expanded=False):
     st.markdown(
         """
-        The **Embarrassment Index** is a custom pitch-level score designed to rank the ugliest swing-and-miss events.
-        Higher scores mean the whiff was more extreme based on where the pitch missed, game context, and whether the batter had already whiffed on the previous pitch of the same at-bat.
+        The **Embarrassment Index** is a custom pitch-level score for ranking the worst swing-and-miss events.
 
-        Each whiff starts with a base score of 10, then gets additional points from four components:
-        - **Out-of-zone bonus:** +10 if the pitch was outside the strike zone.
-        - **Runners on base:** +6 for each occupied base.
-        - **Previous pitch was also a whiff:** +10.
-        - **Miss distance:** +1.25 points for every inch the pitch finished outside the strike zone.
+        It combines four ideas:
+        - Did the batter miss a pitch **outside** the strike zone?
+        - Were there runners on base?
+        - Was the **previous pitch** in the same at-bat also a whiff?
+        - How far did the pitch finish from the strike zone?
 
-        In this app, strike-zone status is determined from Statcast pitch location and batter-specific zone height:
-        - Horizontal bounds: `plate_x` between -0.708 and 0.708 feet.
-        - Vertical bounds: from `sz_bot` to `sz_top`.
-        - If the pitch is inside those bounds, miss distance is 0 and the pitch is classified as **In Zone**.
-        - If it finishes outside the zone, the app computes the straight-line distance from the nearest edge of the zone and converts that distance from feet to inches.
+        Every whiff starts with a base score of 10.
         """
     )
 
+    st.markdown("**Formula**")
     st.latex(r"""
-    \text{Embarrassment Index}
-    =
-    10
-    + 10 \cdot \mathbf{1}(\text{Out of Zone})
-    + 6 \cdot (\text{Runners On})
-    + 10 \cdot \mathbf{1}(\text{Previous Pitch Whiff})
-    + 1.25 \cdot (\text{Miss Distance in Inches})
+    EI = 10 + Z + R + P + D
+    """)
+
+    st.markdown("where")
+
+    st.latex(r"""
+    Z =
+    \begin{cases}
+    10, & \text{if the whiff was out of zone} \\
+    0, & \text{if the whiff was in zone}
+    \end{cases}
+    """)
+
+    st.latex(r"""
+    R = 6 \cdot (\text{runners on base})
+    """)
+
+    st.latex(r"""
+    P =
+    \begin{cases}
+    10, & \text{if the previous pitch in the at-bat was also a whiff} \\
+    0, & \text{otherwise}
+    \end{cases}
+    """)
+
+    st.latex(r"""
+    D = 1.25 \cdot (\text{miss distance in inches})
     """)
 
     st.markdown(
         """
-        Where:
-        - \(\mathbf{1}(\text{Out of Zone})\) is 1 if the pitch missed outside the zone, otherwise 0.
-        - \(\mathbf{1}(\text{Previous Pitch Whiff})\) is 1 if the immediately previous pitch in that at-bat was also a whiff, otherwise 0.
-        - **Runners On** can be 0, 1, 2, or 3.
-        - **Miss Distance in Inches** is 0 for in-zone whiffs and increases as the pitch finishes farther outside the zone.
+        **Strike-zone logic**
+        - The pitch is **in zone** when `plate_x` is between -0.708 and 0.708 feet, and `plate_z` is between `sz_bot` and `sz_top`.
+        - If the pitch is inside those bounds, miss distance is 0.
+        - If the pitch is outside those bounds, the app measures the straight-line distance from the nearest edge of the strike zone.
+        - That distance is converted from feet to inches and used in the formula.
+        """
+    )
 
-        Example:
-        - Out-of-zone whiff
-        - 2 runners on
+    st.markdown("**Example**")
+
+    st.markdown(
+        """
+        Suppose a whiff has:
+        - Out-of-zone miss
+        - 2 runners on base
         - Previous pitch was also a whiff
-        - Miss distance = 14.4 inches
-
-        Then the score is:
+        - Miss distance of 14.4 inches
         """
     )
 
     st.latex(r"""
-    10 + 10 + (6 \cdot 2) + 10 + (1.25 \cdot 14.4)
-    = 10 + 10 + 12 + 10 + 18.0
-    = 60.0
+    EI = 10 + 10 + (6 \cdot 2) + 10 + (1.25 \cdot 14.4)
+    """)
+
+    st.latex(r"""
+    EI = 10 + 10 + 12 + 10 + 18.0 = 60.0
     """)
 
     st.markdown(
         """
-        Interpretation:
-        - Scores in the low range usually come from in-zone misses with empty bases and no prior whiff.
-        - Mid-range scores usually reflect either a bigger chase or more leverage.
-        - The highest scores usually combine a chase pitch, multiple runners on base, a prior whiff in the same at-bat, and a large miss distance.
+        **How to read it**
+        - Lower scores usually come from in-zone misses with empty bases.
+        - Middle scores usually come from either chase swings or higher-leverage situations.
+        - Highest scores usually combine a chase, runners on base, a prior whiff in the same at-bat, and a large miss distance.
         """
     )
 
