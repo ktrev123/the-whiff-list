@@ -415,20 +415,22 @@ most_embarrassing_swings = (
         ["embarrassment_index", "miss_distance_inches", "runners_on"],
         ascending=[False, False, False]
     )
+    .reset_index(drop=True)
     .copy()
 )
+
+most_embarrassing_swings["Rank"] = most_embarrassing_swings.index + 1
 
 st.dataframe(
     most_embarrassing_swings[
         [
+            "Rank",
             "game_date",
             "batter_name",
             "player_name",
             "pitch_name",
             "count",
-            "two_strikes",
             "runners_on",
-            "prev_whiff_ozone",
             "miss_distance_inches",
             "embarrassment_index"
         ]
@@ -440,9 +442,7 @@ st.dataframe(
             "player_name": "Pitcher",
             "pitch_name": "Pitch Type",
             "count": "Count",
-            "two_strikes": "Two Strikes",
             "runners_on": "Runners On",
-            "prev_whiff_ozone": "Prev Pitch O-Zone Whiff",
             "miss_distance_inches": "Miss Distance (in)",
             "embarrassment_index": "Embarrassment Index"
         }
@@ -563,7 +563,7 @@ if not player_whiffs.empty:
 else:
     st.info("No pitch summary available for the selected pitch types.")
 
-st.markdown("### Top 10 Whiffs")
+st.markdown(f"### {selected_player}'s Top 10 Whiffs")
 st.dataframe(
     player_whiffs[
         [
@@ -605,47 +605,39 @@ if not player_whiffs.empty:
     fig = go.Figure()
 
     fig.add_trace(
-        go.Scatter(
-            x=player_whiffs["plate_x"],
-            y=player_whiffs["plate_z"],
-            mode="markers",
-            marker=dict(
-                size=10,
-                color=player_whiffs["embarrassment_index"],
-                colorscale="Reds",
-                cmin=0,
-                cmax=100,
-                showscale=True,
-                colorbar=dict(title="Embarrassment Index")
-            ),
-            customdata=player_whiffs[
-                [
-                    "player_name",
-                    "pitch_name",
-                    "game_date",
-                    "count",
-                    "two_strikes",
-                    "miss_distance_inches",
-                    "zone_split",
-                    "runners_on",
-                    "prev_whiff_ozone",
-                    "embarrassment_index"
-                ]
-            ],
-            hovertemplate=(
-                "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
-                "Date: %{customdata[2]}<br>"
-                "Count: %{customdata[3]}<br>"
-                "Two Strikes: %{customdata[4]}<br>"
-                "Miss Distance: %{customdata[5]} in<br>"
-                "Zone Split: %{customdata[6]}<br>"
-                "Runners On: %{customdata[7]}<br>"
-                "Prev Pitch O-Zone Whiff: %{customdata[8]}<br>"
-                "Embarrassment Index: %{customdata[9]}"
-                "<extra></extra>"
-            )
+    go.Scatter(
+        x=player_whiffs["plate_x"],
+        y=player_whiffs["plate_z"],
+        mode="markers",
+        marker=dict(
+            size=10,
+            color=player_whiffs["embarrassment_index"],
+            colorscale="Cividis",
+            cmin=0,
+            cmax=100,
+            showscale=True,
+            colorbar=dict(title="Embarrassment Index")
+        ),
+        customdata=player_whiffs[
+            [
+                "player_name",
+                "pitch_name",
+                "count",
+                "miss_distance_inches",
+                "runners_on",
+                "embarrassment_index"
+            ]
+        ],
+        hovertemplate=(
+            "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
+            "Count: %{customdata[2]}<br>"
+            "Miss Distance: %{customdata[3]} in<br>"
+            "Runners On: %{customdata[4]}<br>"
+            "Embarrassment Index: %{customdata[5]}"
+            "<extra></extra>"
         )
     )
+)
 
     fig.add_shape(
         type="rect",
@@ -657,7 +649,7 @@ if not player_whiffs.empty:
     )
 
     fig.update_layout(
-        title=f"{selected_player} Whiff Locations",
+        title=f"{selected_player}'s Whiff Locations",
         xaxis_title="Horizontal Location (plate_x)",
         yaxis_title="Vertical Location (plate_z)",
         xaxis=dict(range=[-2.5, 2.5]),
@@ -668,9 +660,3 @@ if not player_whiffs.empty:
     st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("No whiffs found for the selected pitch types.")
-
-st.markdown("### Notes")
-st.write(
-    "Embarrassment Index is a custom 0-100 score that increases with larger out-of-zone miss distance, "
-    "out-of-zone whiffs, runners on base, and repeated out-of-zone swing-and-miss behavior within the same at-bat."
-)
