@@ -9,7 +9,6 @@ st.set_page_config(page_title="The Whiff List", layout="wide")
 @st.cache_data
 def load_pitch_data():
     df = pd.read_parquet("data/statcast_2025.parquet")
-
     df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce")
 
     numeric_cols = [
@@ -104,7 +103,6 @@ def calculate_embarrassment_index(df):
 
     runner_penalty = df["runner_count"] * 6
     prev_penalty = df["prev_pitch_oz_whiff"] * 10
-
     raw_score = base + runner_penalty + prev_penalty
 
     df["embarrassment_index"] = np.where(
@@ -327,10 +325,9 @@ elif view == "Player Breakdown":
 
         display_player_whiffs = player_whiffs.copy()
 
-        if "game_date" in display_player_whiffs.columns:
-            display_player_whiffs["game_date"] = pd.to_datetime(
-                display_player_whiffs["game_date"], errors="coerce"
-            ).dt.strftime("%m-%d")
+        display_player_whiffs["game_date"] = pd.to_datetime(
+            display_player_whiffs["game_date"], errors="coerce"
+        ).dt.strftime("%m-%d")
 
         display_player_whiffs["count"] = (
             display_player_whiffs["balls"].fillna(0).astype(int).astype(str)
@@ -339,10 +336,8 @@ elif view == "Player Breakdown":
         )
 
         table_cols = [
-            col for col in [
-                "game_date", "pitch_name", "count",
-                "miss_distance", "embarrassment_index"
-            ] if col in display_player_whiffs.columns
+            "game_date", "pitch_name", "count",
+            "miss_distance", "embarrassment_index"
         ]
 
         rename_map = {
@@ -376,7 +371,6 @@ elif view == "Player Breakdown":
                     showscale=True,
                     colorbar=dict(title="Embarrassment")
                 ),
-                text=chart_df["pitch_name"],
                 customdata=np.stack([
                     pd.to_datetime(chart_df["game_date"], errors="coerce").dt.strftime("%m-%d"),
                     chart_df["pitch_name"].fillna("Unknown"),
