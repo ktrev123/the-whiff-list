@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-
 st.set_page_config(page_title="The Whiff List", layout="wide")
 
 
@@ -11,12 +10,13 @@ st.set_page_config(page_title="The Whiff List", layout="wide")
 def load_pitch_data():
     df = pd.read_parquet("data/statcast_2025.parquet")
 
-    df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce")
+    if "game_date" in df.columns:
+        df["game_date"] = pd.to_datetime(df["game_date"], errors="coerce")
 
     numeric_cols = [
         "plate_x", "plate_z", "sz_top", "sz_bot",
-        "zone", "balls", "strikes",
-        "on_1b", "on_2b", "on_3b"
+        "balls", "strikes", "on_1b", "on_2b", "on_3b",
+        "game_pk", "at_bat_number", "pitch_number", "batter", "pitcher"
     ]
     for col in numeric_cols:
         if col in df.columns:
@@ -35,7 +35,8 @@ def get_headshot_url(player_id):
 
 
 def calculate_miss_distance(row):
-    if pd.isna(row["plate_x"]) or pd.isna(row["plate_z"]) or pd.isna(row["sz_top"]) or pd.isna(row["sz_bot"]):
+    needed = ["plate_x", "plate_z", "sz_top", "sz_bot"]
+    if any(pd.isna(row.get(col)) for col in needed):
         return np.nan
 
     left_edge = -0.7083
@@ -67,10 +68,7 @@ def calculate_embarrassment_index(df):
     if "miss_distance" not in df.columns:
         df["miss_distance"] = df.apply(calculate_miss_distance, axis=1)
 
-    if "zone" in df.columns:
-        df["in_zone"] = np.where(df["zone"].between(1, 9), 1, 0)
-    else:
-        df["in_zone"] = np.where(df["miss_distance"] == 0, 1, 0)
+    df["in_zone"] = np.where(df["miss_distance"].fillna(0) == 0, 1, 0)
 
     df["runner_count"] = (
         df["on_1b"].notna().astype(int) +
@@ -78,25 +76,32 @@ def calculate_embarrassment_index(df):
         df["on_3b"].notna().astype(int)
     )
 
-    df = df.sort_values(
-        by=["player_name", "game_date", "game_pk", "at_bat_number", "pitch_number"],
-        kind="stable"
-    )
+    sort_cols = [
+        col for col in ["player_name", "game_date", "game_pk", "at_bat_number", "pitch_number"]
+        if col in df.columns
+    ]
+    if sort_cols:
+        df = df.sort_values(by=sort_cols, kind="stable").reset_index(drop=True)
+    else:
+        df = df.reset_index(drop=True)
 
     df["prev_pitch_oz_whiff"] = 0
-    same_ab = (
-        (df["player_name"] == df["player_name"].shift(1)) &
-        (df["game_pk"] == df["game_pk"].shift(1)) &
-        (df["at_bat_number"] == df["at_bat_number"].shift(1))
-    )
 
-    prev_was_oz_whiff = (
-        same_ab &
-        df["description"].shift(1).isin(["swinging_strike", "swinging_strike_blocked", "missed_bunt"]) &
-        (df["in_zone"].shift(1) == 0)
-    )
+    same_ab = pd.Series(True, index=df.index)
 
-    df.loc[prev_was_oz_whiff, "prev_pitch_oz_whiff"] = 1
+    if "player_name" in df.columns:
+        same_ab &= df["player_name"].eq(df["player_name"].shift(1))
+    if "game_pk" in df.columns:
+        same_ab &= df["game_pk"].eq(df["game_pk"].shift(1))
+    if "at_bat_number" in df.columns:
+        same_ab &= df["at_bat_number"].eq(df["at_bat_number"].shift(1))
+
+    prev_was_whiff = df["description"].shift(1).isin([
+        "swinging_strike", "swinging_strike_blocked", "missed_bunt"
+    ])
+    prev_was_oz = df["in_zone"].shift(1).eq(0)
+
+    df.loc[same_ab & prev_was_whiff & prev_was_oz, "prev_pitch_oz_whiff"] = 1
 
     base = np.where(
         df["in_zone"] == 0,
@@ -106,11 +111,12 @@ def calculate_embarrassment_index(df):
 
     runner_penalty = df["runner_count"] * 6
     prev_penalty = df["prev_pitch_oz_whiff"] * 10
-
     raw_score = base + runner_penalty + prev_penalty
 
     df["embarrassment_index"] = np.where(
-        df["description"].isin(["swinging_strike", "swinging_strike_blocked", "missed_bunt"]),
+        df["description"].isin([
+            "swinging_strike", "swinging_strike_blocked", "missed_bunt"
+        ]),
         np.clip(raw_score, 0, 100),
         np.nan
     )
@@ -131,12 +137,18 @@ swing_descriptions = [
 ab_events = [
     "single", "double", "triple", "home_run", "field_out",
     "grounded_into_double_play", "force_out", "double_play",
-    "fielders_choice_out", "field_error", "strikeout", "strikeout_double_play"
+    "fielders_choice", "field_error", "strikeout", "strikeout_double_play"
 ]
 
 pitch_data["is_whiff"] = pitch_data["description"].isin(whiff_descriptions).astype(int)
 pitch_data["is_swing"] = pitch_data["description"].isin(swing_descriptions).astype(int)
 pitch_data["ab_flag"] = pitch_data["events"].isin(ab_events).astype(int)
+
+pitch_data["oz_embarrassment"] = np.where(
+    (pitch_data["is_whiff"] == 1) & (pitch_data["in_zone"] == 0),
+    pitch_data["embarrassment_index"],
+    np.nan
+)
 
 st.sidebar.title("The Whiff List")
 
@@ -160,12 +172,12 @@ month_map = {
     10: "October"
 }
 
-default_months = [month_map[m] for m in available_months if m in month_map]
+month_options = [month_map[m] for m in available_months if m in month_map]
 
 selected_month_names = st.sidebar.multiselect(
     "Month",
-    options=default_months,
-    default=default_months
+    options=month_options,
+    default=month_options
 )
 
 selected_month_nums = [
@@ -194,7 +206,7 @@ leaderboard = (
         AB=("ab_flag", "sum"),
         Swings=("is_swing", "sum"),
         Whiffs=("is_whiff", "sum"),
-        Avg_O_Zone_Embarrassment=("embarrassment_index", lambda x: x[filtered_pitch_data.loc[x.index, "in_zone"] == 0].mean()),
+        Avg_O_Zone_Embarrassment=("oz_embarrassment", "mean"),
         batter_id=("batter", "first")
     )
 )
@@ -311,7 +323,13 @@ elif view == "Player Breakdown":
         total_whiffs = len(player_whiffs)
         in_zone_whiffs = int((player_whiffs["in_zone"] == 1).sum()) if "in_zone" in player_whiffs.columns else 0
         out_zone_whiffs = int((player_whiffs["in_zone"] == 0).sum()) if "in_zone" in player_whiffs.columns else 0
-        avg_embarrassment = round(player_whiffs.loc[player_whiffs["in_zone"] == 0, "embarrassment_index"].mean(), 1) if total_whiffs > 0 else np.nan
+
+        if out_zone_whiffs > 0:
+            avg_embarrassment = round(
+                player_whiffs.loc[player_whiffs["in_zone"] == 0, "embarrassment_index"].mean(), 1
+            )
+        else:
+            avg_embarrassment = np.nan
 
         metric1, metric2, metric3, metric4 = st.columns(4)
         metric1.metric("Total Whiffs", total_whiffs)
@@ -326,22 +344,26 @@ elif view == "Player Breakdown":
                 display_player_whiffs["game_date"], errors="coerce"
             ).dt.strftime("%m-%d")
 
+        if "balls" in display_player_whiffs.columns and "strikes" in display_player_whiffs.columns:
+            display_player_whiffs["count_display"] = (
+                display_player_whiffs["balls"].fillna(0).astype(int).astype(str)
+                + "-"
+                + display_player_whiffs["strikes"].fillna(0).astype(int).astype(str)
+            )
+
         table_cols = [
             col for col in [
-                "game_date", "pitcher", "pitch_name", "count", "balls", "strikes",
-                "plate_x", "plate_z", "miss_distance", "embarrassment_index"
+                "game_date", "pitch_name", "count_display",
+                "balls", "strikes", "miss_distance", "embarrassment_index"
             ] if col in display_player_whiffs.columns
         ]
 
         rename_map = {
             "game_date": "Date",
-            "pitcher": "Pitcher",
             "pitch_name": "Pitch Type",
-            "count": "Count",
+            "count_display": "Count",
             "balls": "Balls",
             "strikes": "Strikes",
-            "plate_x": "Plate X",
-            "plate_z": "Plate Z",
             "miss_distance": "Miss Distance",
             "embarrassment_index": "Embarrassment Index"
         }
@@ -358,6 +380,8 @@ elif view == "Player Breakdown":
         fig = go.Figure()
 
         if not chart_df.empty:
+            chart_dates = pd.to_datetime(chart_df["game_date"], errors="coerce").dt.strftime("%m-%d")
+
             fig.add_trace(go.Scatter(
                 x=chart_df["plate_x"],
                 y=chart_df["plate_z"],
@@ -369,10 +393,9 @@ elif view == "Player Breakdown":
                     showscale=True,
                     colorbar=dict(title="Embarrassment")
                 ),
-                text=chart_df["pitch_name"],
                 customdata=np.stack([
-                    chart_df["game_date"].dt.strftime("%m-%d"),
-                    chart_df["pitch_name"],
+                    chart_dates,
+                    chart_df["pitch_name"].fillna("Unknown"),
                     chart_df["embarrassment_index"].round(1)
                 ], axis=-1),
                 hovertemplate=(
