@@ -79,13 +79,13 @@ def calculate_embarrassment_index(df):
     )
 
     df = df.sort_values(
-        by=["batter_name", "game_date", "game_pk", "at_bat_number", "pitch_number"],
+        by=["player_name", "game_date", "game_pk", "at_bat_number", "pitch_number"],
         kind="stable"
     )
 
     df["prev_pitch_oz_whiff"] = 0
     same_ab = (
-        (df["batter_name"] == df["batter_name"].shift(1)) &
+        (df["player_name"] == df["player_name"].shift(1)) &
         (df["game_pk"] == df["game_pk"].shift(1)) &
         (df["at_bat_number"] == df["at_bat_number"].shift(1))
     )
@@ -189,7 +189,7 @@ leaderboard_metric = st.sidebar.selectbox(
 )
 
 leaderboard = (
-    filtered_pitch_data.groupby("batter_name", as_index=False)
+    filtered_pitch_data.groupby("player_name", as_index=False)
     .agg(
         AB=("ab_flag", "sum"),
         Swings=("is_swing", "sum"),
@@ -230,10 +230,10 @@ leaderboard = leaderboard.sort_values(
 leaderboard["Rank"] = leaderboard.index + 1
 
 display_df = leaderboard[
-    ["Rank", "batter_name", "AB", "Swings", "Whiffs", "Whiff Rate (%)", "Avg O-Zone Embarrassment"]
-].rename(columns={"batter_name": "Batter"})
+    ["Rank", "player_name", "AB", "Swings", "Whiffs", "Whiff Rate (%)", "Avg O-Zone Embarrassment"]
+].rename(columns={"player_name": "Batter"})
 
-player_options = sorted(filtered_pitch_data["batter_name"].dropna().unique().tolist())
+player_options = sorted(filtered_pitch_data["player_name"].dropna().unique().tolist())
 
 if "selected_player_name" not in st.session_state:
     st.session_state.selected_player_name = player_options[0] if player_options else None
@@ -266,7 +266,7 @@ elif view == "Player Breakdown":
         st.warning("No players available for the current filter selection.")
     else:
         player_whiffs = filtered_pitch_data[
-            (filtered_pitch_data["batter_name"] == selected_player) &
+            (filtered_pitch_data["player_name"] == selected_player) &
             (filtered_pitch_data["is_whiff"] == 1)
         ].copy()
 
@@ -292,7 +292,7 @@ elif view == "Player Breakdown":
         )
 
         player_id_series = filtered_pitch_data.loc[
-            filtered_pitch_data["batter_name"] == selected_player, "batter"
+            filtered_pitch_data["player_name"] == selected_player, "batter"
         ].dropna()
 
         player_id = player_id_series.iloc[0] if not player_id_series.empty else None
