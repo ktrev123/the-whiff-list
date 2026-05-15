@@ -71,7 +71,7 @@ whiff_desc = {"swinging_strike", "swinging_strike_blocked", "missed_bunt"}
 pitch_data = pitch_data[pitch_data["description"].isin(whiff_desc)].copy()
 pitch_data = pitch_data.dropna(subset=["batter", "plate_x", "plate_z", "sz_top", "sz_bot"])
 
-# Global Logic & EI Calculation
+# Global Logic
 name_lookup = df_base[["batter", "player_name"]].drop_duplicates().rename(columns={"player_name": "batter_name"})
 pitch_data = pitch_data.merge(name_lookup, on="batter", how="left")
 pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
@@ -81,23 +81,24 @@ pitch_data["zone_split"] = np.where(pitch_data["miss_dist_in"] == 0, "In Zone", 
 pitch_data["runners_on"] = pitch_data[["on_1b", "on_2b", "on_3b"]].notna().sum(axis=1)
 pitch_data["count"] = pitch_data["balls"].fillna(0).astype(int).astype(str) + "-" + pitch_data["strikes"].fillna(0).astype(int).astype(str)
 
-# Formula: 100 * (0.45D + 0.20Z + 0.15P + 0.20R)
-# For this turn, assuming P=0 if not calculated, but keeping the requested logic
+# EI Score (100 * (0.45D + 0.20Z + 0.20R))
 pitch_data["ei"] = (100 * (0.45 * np.minimum(pitch_data["miss_dist_in"]/18, 1.0) + 
                           0.20 * (pitch_data["zone_split"] == "Out of Zone").astype(float) + 
                           0.20 * (pitch_data["runners_on"]/3.0))).round(1)
 
-# --- TRENDS ---
+# --- HEADER ---
 st.title("The Whiff List 💨")
+
+# --- TRENDS (7-Day Rolling) ---
 st.markdown('<div class="whiff-section-label">Seasonal Trends</div>', unsafe_allow_html=True)
 trend = pitch_data[pitch_data["zone_split"] == "Out of Zone"].groupby("game_date").agg(vol=("description", "count"), ei=("ei", "mean")).reset_index()
 trend["vol_roll"] = trend["vol"].rolling(7).mean()
 trend["ei_roll"] = trend["ei"].rolling(7).mean()
 
 fig_t = go.Figure()
-fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["vol_roll"], name="Rolling Vol", line=dict(color="#c24141")))
-fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["ei_roll"], name="Rolling EI", line=dict(color="#d4a937"), yaxis="y2"))
-fig_t.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis=dict(title="Vol"), yaxis2=dict(overlaying="y", side="right"), height=300)
+fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["vol_roll"], name="7-Day Vol", line=dict(color="#c24141")))
+fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["ei_roll"], name="7-Day Avg EI", line=dict(color="#d4a937"), yaxis="y2"))
+fig_t.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis=dict(title="Volume"), yaxis2=dict(title="Avg EI", overlaying="y", side="right"), height=300)
 st.plotly_chart(fig_t, use_container_width=True)
 
 # --- LEADERBOARD ---
@@ -111,14 +112,14 @@ df_lb["Whiff%"] = (df_lb["whiff_rate"] * 100).round(1)
 
 st.markdown('<div class="whiff-section-label">League View</div>', unsafe_allow_html=True)
 st.markdown("### Chase Leaderboard")
-# Required: Rank, Batter, ABs, Swings, Whiffs, Whiff%, Avg EI
+# Headers: Rank, Batter, ABs, Swings, Whiffs, Whiff%, Avg EI
 lb_display = df_lb[["Rank", "player_name", "ab", "swings", "whiffs", "Whiff%", "avg_ei"]].rename(columns={"player_name": "Batter", "ab": "ABs", "avg_ei": "Avg EI"})
 st.dataframe(lb_display, use_container_width=True, hide_index=True)
 
 # --- WORST WHIFFERS ---
 st.markdown('<div class="whiff-section-label">Worst Swings</div>', unsafe_allow_html=True)
 st.markdown("### Worst Whiffers")
-# Required: Batter, Pitcher, Pitch Type, Count, Runners On, Miss Dist (in), EI
+# Headers: Batter, Pitcher, Pitch Type, Count, Runners On, Miss Dist (in), EI
 worst_df = pitch_data[pitch_data["zone_split"] == "Out of Zone"].sort_values("ei", ascending=False).head(25)
 st.dataframe(worst_df[["batter_name", "player_name", "pitch_name", "count", "runners_on", "miss_dist_in", "ei"]].rename(
     columns={"batter_name": "Batter", "player_name": "Pitcher", "pitch_name": "Pitch Type", "count": "Count", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
@@ -130,35 +131,49 @@ p_list = sorted(pitch_data["batter_name"].dropna().unique())
 sel_hitter = st.sidebar.selectbox("Select Hitter", p_list, index=p_list.index("Shohei Ohtani") if "Shohei Ohtani" in p_list else 0)
 p_whiffs = pitch_data[pitch_data["batter_name"] == sel_hitter].copy()
 
-c_t, c_i = st.columns([4, 1]) # Corrected variables
+c_t, c_i = st.columns([4, 1])
 with c_t: 
     st.markdown(f"### Player Breakdown: {sel_hitter}")
-with c_i: # Fixed NameError from previous turn
+with c_i:
     pid = int(p_whiffs["batter"].iloc[0]) if not p_whiffs.empty else None
     if pid: 
         st.image(f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{pid}/headshot/67/current", width=150)
 
-# Required: Pitcher, Pitch Type, Runners On, Miss Dist (in), EI
-st.markdown('<div class="whiff-section-label">Player view</div>', unsafe_allow_html=True)
+# Headers: Pitcher, Pitch Type, Runners On, Miss Dist (in), EI
+st.markdown('<div class="whiff-section-label">Player View</div>', unsafe_allow_html=True)
 st.markdown(f"### {sel_hitter}'s Top Whiffs")
 st.dataframe(p_whiffs[["player_name", "pitch_name", "runners_on", "miss_dist_in", "ei"]].sort_values("ei", ascending=False).head(10).rename(
     columns={"player_name": "Pitcher", "pitch_name": "Pitch Type", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
 ), use_container_width=True, hide_index=True)
 
-# --- STRIKE ZONE VISUAL ---
+# --- STRIKE ZONE VISUAL + TOOLTIPS ---
 if not p_whiffs.empty:
     fig_sz = go.Figure()
-    fig_sz.add_trace(go.Scatter(x=p_whiffs["plate_x"], y=p_whiffs["plate_z"], mode="markers", marker=dict(size=11, color=p_whiffs["ei"], colorscale="Cividis", showscale=True, colorbar=dict(title="EI"))))
+    
+    # Custom Tooltips: Pitcher's Pitch, Runners, Count, Miss Distance
+    fig_sz.add_trace(go.Scatter(
+        x=p_whiffs["plate_x"], 
+        y=p_whiffs["plate_z"], 
+        mode="markers", 
+        marker=dict(size=11, color=p_whiffs["ei"], colorscale="Cividis", showscale=True, colorbar=dict(title="EI")),
+        customdata=p_whiffs[["player_name", "pitch_name", "runners_on", "count", "miss_dist_in"]],
+        hovertemplate=(
+            "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
+            "Runners On: %{customdata[2]}<br>"
+            "Count: %{customdata[3]}<br>"
+            "Miss Distance: %{customdata[4]} in<br>"
+            "<extra></extra>"
+        )
+    ))
     
     avg_bot, avg_top = p_whiffs["sz_bot"].mean(), p_whiffs["sz_top"].mean()
-    # Zone Border
+    # Main Rectangle: 1:1 Scaleratio for accurate proportions
     fig_sz.add_shape(type="rect", x0=-0.708, x1=0.708, y0=avg_bot, y1=avg_top, line=dict(color="#f5efe3", width=3))
     
     fig_sz.update_layout(
         template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        # Forced 1:1 Aspect Ratio to ensure it stays rectangular
         xaxis=dict(range=[-2.5, 2.5], title="Horizontal (ft)", scaleanchor="y", scaleratio=1),
         yaxis=dict(range=[0, 6], title="Vertical (ft)"),
-        height=750 # Increased height for better rectangular presence
+        height=800 
     )
     st.plotly_chart(fig_sz, use_container_width=True)
