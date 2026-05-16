@@ -103,38 +103,36 @@ st.plotly_chart(fig_t, use_container_width=True)
 
 # --- LEFT VS. RIGHT COMPARISON ---
 st.markdown('<div class="whiff-section-label">Platoon Splits</div>', unsafe_allow_html=True)
-st.markdown("### Left vs. Right Intensity Distribution")
+st.markdown("### Avg Embarrassment Index by Pitch Type")
 
-# Ensure we are looking at Out of Zone chases for fairness, grouped by Batter Handedness (stand)
 splits_df = pitch_data[pitch_data["zone_split"] == "Out of Zone"].copy()
+splits_df["Handedness"] = splits_df["stand"].map({"L": "Left", "R": "Right"})
 
-# Map 'L' and 'R' to cleaner display names
-splits_df["Handedness"] = splits_df["stand"].map({"L": "Left-Handed Hitter", "R": "Right-Handed Hitter"}).fillna(splits_df["stand"])
+# Filter for primary pitch classifications to keep the x-axis clean
+main_pitches = ["4-Seam Fastball", "Slider", "Changeup", "Curveball", "Sinker", "Cutter", "Sweeper"]
+pitch_splits = splits_df[splits_df["pitch_name"].isin(main_pitches)].groupby(["pitch_name", "Handedness"])["ei"].mean().reset_index()
 
 fig_splits = go.Figure()
 
-# Add Box plot for each hand
-for hand in sorted(splits_df["Handedness"].dropna().unique()):
-    hand_data = splits_df[splits_df["Handedness"] == hand]
-    
-    fig_splits.add_trace(go.Box(
-        y=hand_data["ei"],
-        name=hand,
-        boxpoints="outliers", # Only show points that are extreme outliers to keep it clean
-        marker=dict(color="#d4a937" if "Left" in hand else "#c24141"),
-        line=dict(width=2),
-        notched=True # Notching shows confidence intervals around the median; highly statistical
+for hand in ["Left", "Right"]:
+    hand_df = pitch_splits[pitch_splits["Handedness"] == hand]
+    fig_splits.add_trace(go.Bar(
+        x=hand_df["pitch_name"],
+        y=hand_df["ei"],
+        name=f"{hand}-Handed Hitters",
+        marker_color="#d4a937" if hand == "Left" else "#c24141"
     ))
 
 fig_splits.update_layout(
     template="plotly_dark",
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    yaxis_title="Embarrassment Index Distribution",
-    xaxis_title="Hitter Handedness",
+    barmode="group",
+    yaxis_title="Avg Embarrassment Index",
+    xaxis_title="Pitch Type",
     height=400,
-    showlegend=False,
-    margin=dict(t=10, b=10)
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    margin=dict(t=20, b=20)
 )
 
 st.plotly_chart(fig_splits, use_container_width=True)
@@ -188,18 +186,19 @@ st.dataframe(p_whiffs[["player_name", "pitch_name", "runners_on", "miss_dist_in"
 if not p_whiffs.empty:
     fig_sz = go.Figure()
     
-    # Custom Tooltips: Pitcher's Pitch, Runners, Count, Miss Distance
+# Custom Tooltips: Added EI to the final slot
     fig_sz.add_trace(go.Scatter(
         x=p_whiffs["plate_x"], 
         y=p_whiffs["plate_z"], 
         mode="markers", 
         marker=dict(size=11, color=p_whiffs["ei"], colorscale="Cividis", showscale=True, colorbar=dict(title="EI")),
-        customdata=p_whiffs[["player_name", "pitch_name", "runners_on", "count", "miss_dist_in"]],
+        customdata=p_whiffs[["player_name", "pitch_name", "runners_on", "count", "miss_dist_in", "ei"]],
         hovertemplate=(
             "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
             "Runners On: %{customdata[2]}<br>"
             "Count: %{customdata[3]}<br>"
             "Miss Distance: %{customdata[4]} in<br>"
+            "Embarrassment Index: %{customdata[5]}<br>"
             "<extra></extra>"
         )
     ))
