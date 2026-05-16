@@ -31,6 +31,13 @@ div[data-testid="stMetric"] {
 div[data-testid="stDataFrame"] { border: 1px solid var(--whiff-border); border-radius: 14px; overflow: hidden; }
 .whiff-section-label { color: var(--whiff-gold); font-size: 0.86rem; font-weight: 700; text-transform: uppercase; margin-bottom: 0.25rem; }
 .whiff-divider { height: 1px; width: 100%; background: linear-gradient(90deg, rgba(212,169,55,0) 0%, rgba(212,169,55,0.55) 50%, rgba(212,169,55,0) 100%); margin: 2rem 0 1.5rem 0; }
+.methodology-box {
+    background-color: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--whiff-border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 25px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -81,15 +88,69 @@ pitch_data["zone_split"] = np.where(pitch_data["miss_dist_in"] == 0, "In Zone", 
 pitch_data["runners_on"] = pitch_data[["on_1b", "on_2b", "on_3b"]].notna().sum(axis=1)
 pitch_data["count"] = pitch_data["balls"].fillna(0).astype(int).astype(str) + "-" + pitch_data["strikes"].fillna(0).astype(int).astype(str)
 
-# EI Score (100 * (0.45D + 0.20Z + 0.20R))
+# EI Score
 pitch_data["ei"] = (100 * (0.45 * np.minimum(pitch_data["miss_dist_in"]/18, 1.0) + 
                           0.20 * (pitch_data["zone_split"] == "Out of Zone").astype(float) + 
                           0.20 * (pitch_data["runners_on"]/3.0))).round(1)
 
 # --- HEADER ---
 st.title("The Whiff List 💨")
+st.markdown('<div class="whiff-subtle">Tracking the ugliest chase whiffs and repeat flails from the 2025 MLB season.</div>', unsafe_allow_html=True)
 
-# --- TRENDS (7-Day Rolling) ---
+# --- METHODOLOGY SECTION ---
+st.markdown('<div class="whiff-section-label">Valuation Framework</div>', unsafe_allow_html=True)
+st.markdown("### Metrics Architecture: The Embarrassment Index")
+
+with st.container():
+    st.markdown("""
+    <div class="methodology-box">
+        <h4>Why evaluate Whiff Quality?</h4>
+        <p>Standard box-score metrics treat every swing-and-miss identically. However, a whiff on a borderline sinking fastball is 
+        fundamentally different from an uncompetitive chase on a slider two feet outside the zone. The <b>Embarrassment Index (EI)</b> 
+        is a context-aware tracking metric designed to isolate non-competitive, high-leverage plate discipline failures.</p>
+        <h4>How it is calculated:</h4>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col_m1, col_m2 = st.columns(2)
+    with col_m1:
+        st.latex(r"EI = 100 \cdot \left(0.45 \cdot D + 0.20 \cdot Z + 0.20 \cdot R\right)")
+    with col_m2:
+        st.markdown("""
+        * **$D$ (Distance Penalty):** Linear scaling of the raw miss distance from the strike zone boundary, capped at 18 inches.
+        * **$Z$ (Zone Split):** A binary penalty applied instantly if the pitch is tracked completely outside the strike zone.
+        * **$R$ (Leverage Factor):** Scales the severity of the whiff based on base-runner occupancy (punishing high-leverage flails).
+        """)
+
+st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
+
+# --- LEAGUE HEATMAP (The Whole Dataset) ---
+st.markdown('<div class="whiff-section-label">League Profile</div>', unsafe_allow_html=True)
+st.markdown("### Full-Season Whiff Density Heatmap")
+
+fig_heat = go.Figure()
+# Generate 2D Contour Density Map
+fig_heat.add_trace(go.Histogram2dContour(
+    x=pitch_data["plate_x"],
+    y=pitch_data["plate_z"],
+    colorscale="YlOrRd",
+    reversescale=False,
+    ncontours=30,
+    line=dict(width=0),
+    showscale=True,
+    colorbar=dict(title="Whiff Concentration")
+))
+# Standard league strike zone boundary overlay
+fig_heat.add_shape(type="rect", x0=-0.708, x1=0.708, y0=1.6, y1=3.4, line=dict(color="#f5efe3", width=3))
+fig_heat.update_layout(
+    template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    xaxis=dict(range=[-2.5, 2.5], title="Horizontal Plate Location (ft)", scaleanchor="y", scaleratio=1),
+    yaxis=dict(range=[0, 6], title="Vertical Plate Location (ft)"),
+    height=600
+)
+st.plotly_chart(fig_heat, use_container_width=True)
+
+# --- TRENDS ---
 st.markdown('<div class="whiff-section-label">Seasonal Trends</div>', unsafe_allow_html=True)
 trend = pitch_data[pitch_data["zone_split"] == "Out of Zone"].groupby("game_date").agg(vol=("description", "count"), ei=("ei", "mean")).reset_index()
 trend["vol_roll"] = trend["vol"].rolling(7).mean()
@@ -101,40 +162,19 @@ fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["ei_roll"], name="7-Day
 fig_t.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis=dict(title="Volume"), yaxis2=dict(title="Avg EI", overlaying="y", side="right"), height=300)
 st.plotly_chart(fig_t, use_container_width=True)
 
-# --- LEFT VS. RIGHT COMPARISON ---
+# --- PLATOON SPLITS BAR CHART ---
 st.markdown('<div class="whiff-section-label">Platoon Splits</div>', unsafe_allow_html=True)
 st.markdown("### Avg Embarrassment Index by Pitch Type")
-
 splits_df = pitch_data[pitch_data["zone_split"] == "Out of Zone"].copy()
 splits_df["Handedness"] = splits_df["stand"].map({"L": "Left", "R": "Right"})
-
-# Filter for primary pitch classifications to keep the x-axis clean
 main_pitches = ["4-Seam Fastball", "Slider", "Changeup", "Curveball", "Sinker", "Cutter", "Sweeper"]
 pitch_splits = splits_df[splits_df["pitch_name"].isin(main_pitches)].groupby(["pitch_name", "Handedness"])["ei"].mean().reset_index()
 
 fig_splits = go.Figure()
-
 for hand in ["Left", "Right"]:
     hand_df = pitch_splits[pitch_splits["Handedness"] == hand]
-    fig_splits.add_trace(go.Bar(
-        x=hand_df["pitch_name"],
-        y=hand_df["ei"],
-        name=f"{hand}-Handed Hitters",
-        marker_color="#d4a937" if hand == "Left" else "#c24141"
-    ))
-
-fig_splits.update_layout(
-    template="plotly_dark",
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    barmode="group",
-    yaxis_title="Avg Embarrassment Index",
-    xaxis_title="Pitch Type",
-    height=400,
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    margin=dict(t=20, b=20)
-)
-
+    fig_splits.add_trace(go.Bar(x=hand_df["pitch_name"], y=hand_df["ei"], name=f"{hand}-Handed Hitters", marker_color="#d4a937" if hand == "Left" else "#c24141"))
+fig_splits.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", barmode="group", yaxis_title="Avg EI", height=350, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
 st.plotly_chart(fig_splits, use_container_width=True)
 
 # --- LEADERBOARD ---
@@ -148,14 +188,12 @@ df_lb["Whiff%"] = (df_lb["whiff_rate"] * 100).round(1)
 
 st.markdown('<div class="whiff-section-label">League View</div>', unsafe_allow_html=True)
 st.markdown("### Chase Leaderboard")
-# Headers: Rank, Batter, ABs, Swings, Whiffs, Whiff%, Avg EI
 lb_display = df_lb[["Rank", "player_name", "ab", "swings", "whiffs", "Whiff%", "avg_ei"]].rename(columns={"player_name": "Batter", "ab": "ABs", "avg_ei": "Avg EI"})
 st.dataframe(lb_display, use_container_width=True, hide_index=True)
 
 # --- WORST WHIFFERS ---
 st.markdown('<div class="whiff-section-label">Worst Swings</div>', unsafe_allow_html=True)
 st.markdown("### Worst Whiffers")
-# Headers: Batter, Pitcher, Pitch Type, Count, Runners On, Miss Dist (in), EI
 worst_df = pitch_data[pitch_data["zone_split"] == "Out of Zone"].sort_values("ei", ascending=False).head(25)
 st.dataframe(worst_df[["batter_name", "player_name", "pitch_name", "count", "runners_on", "miss_dist_in", "ei"]].rename(
     columns={"batter_name": "Batter", "player_name": "Pitcher", "pitch_name": "Pitch Type", "count": "Count", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
@@ -168,29 +206,22 @@ sel_hitter = st.sidebar.selectbox("Select Hitter", p_list, index=p_list.index("S
 p_whiffs = pitch_data[pitch_data["batter_name"] == sel_hitter].copy()
 
 c_t, c_i = st.columns([4, 1])
-with c_t: 
-    st.markdown(f"### Player Breakdown: {sel_hitter}")
+with c_t: st.markdown(f"### Player Breakdown: {sel_hitter}")
 with c_i:
     pid = int(p_whiffs["batter"].iloc[0]) if not p_whiffs.empty else None
-    if pid: 
-        st.image(f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{pid}/headshot/67/current", width=150)
+    if pid: st.image(f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{pid}/headshot/67/current", width=150)
 
-# Headers: Pitcher, Pitch Type, Runners On, Miss Dist (in), EI
 st.markdown('<div class="whiff-section-label">Player View</div>', unsafe_allow_html=True)
 st.markdown(f"### {sel_hitter}'s Top Whiffs")
 st.dataframe(p_whiffs[["player_name", "pitch_name", "runners_on", "miss_dist_in", "ei"]].sort_values("ei", ascending=False).head(10).rename(
     columns={"player_name": "Pitcher", "pitch_name": "Pitch Type", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
 ), use_container_width=True, hide_index=True)
 
-# --- STRIKE ZONE VISUAL + TOOLTIPS ---
+# --- INDIVIDUAL STRIKE ZONE + FIXED TOOLTIPS ---
 if not p_whiffs.empty:
     fig_sz = go.Figure()
-    
-# Custom Tooltips: Added EI to the final slot
     fig_sz.add_trace(go.Scatter(
-        x=p_whiffs["plate_x"], 
-        y=p_whiffs["plate_z"], 
-        mode="markers", 
+        x=p_whiffs["plate_x"], y=p_whiffs["plate_z"], mode="markers", 
         marker=dict(size=11, color=p_whiffs["ei"], colorscale="Cividis", showscale=True, colorbar=dict(title="EI")),
         customdata=p_whiffs[["player_name", "pitch_name", "runners_on", "count", "miss_dist_in", "ei"]],
         hovertemplate=(
@@ -202,15 +233,7 @@ if not p_whiffs.empty:
             "<extra></extra>"
         )
     ))
-    
     avg_bot, avg_top = p_whiffs["sz_bot"].mean(), p_whiffs["sz_top"].mean()
-    # Main Rectangle: 1:1 Scaleratio for accurate proportions
     fig_sz.add_shape(type="rect", x0=-0.708, x1=0.708, y0=avg_bot, y1=avg_top, line=dict(color="#f5efe3", width=3))
-    
-    fig_sz.update_layout(
-        template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(range=[-2.5, 2.5], title="Horizontal (ft)", scaleanchor="y", scaleratio=1),
-        yaxis=dict(range=[0, 6], title="Vertical (ft)"),
-        height=800 
-    )
+    fig_sz.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(range=[-2.5, 2.5], title="Horizontal (ft)", scaleanchor="y", scaleratio=1), yaxis=dict(range=[0, 6], title="Vertical (ft)"), height=750)
     st.plotly_chart(fig_sz, use_container_width=True)
