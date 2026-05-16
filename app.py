@@ -86,9 +86,10 @@ pitch_data["zone_split"] = np.where(pitch_data["miss_dist_in"] == 0, "In Zone", 
 pitch_data["runners_on"] = pitch_data[["on_1b", "on_2b", "on_3b"]].notna().sum(axis=1)
 pitch_data["count"] = pitch_data["balls"].fillna(0).astype(int).astype(str) + "-" + pitch_data["strikes"].fillna(0).astype(int).astype(str)
 
-pitch_data["ei"] = (100 * (0.45 * np.minimum(pitch_data["miss_dist_in"]/18, 1.0) + 
-                          0.20 * (pitch_data["zone_split"] == "Out of Zone").astype(float) + 
-                          0.20 * (pitch_data["runners_on"]/3.0))).round(1)
+# FIXED FORMULA: Divided by 0.85 to re-normalize the scale to a true 100 max score
+pitch_data["ei"] = ((100 / 0.85) * (0.45 * np.minimum(pitch_data["miss_dist_in"]/18, 1.0) + 
+                                    0.20 * (pitch_data["zone_split"] == "Out of Zone").astype(float) + 
+                                    0.20 * (pitch_data["runners_on"]/3.0))).round(1)
 
 # --- HEADER ---
 st.title("The Whiff List 💨")
@@ -112,7 +113,7 @@ with st.container():
     
     col_m1, col_m2 = st.columns(2)
     with col_m1:
-        st.latex(r"EI = 100 \cdot \left(0.45 \cdot D + 0.20 \cdot Z + 0.20 \cdot R\right)")
+        st.latex(r"EI = \frac{100}{0.85} \cdot \left(0.45 \cdot D + 0.20 \cdot Z + 0.20 \cdot R\right)")
     with col_m2:
         st.markdown("""
         * **$D$ (Distance Penalty):** Linear scaling of the raw miss distance from the strike zone boundary, capped at 18 inches.
@@ -122,7 +123,7 @@ with st.container():
 
 st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
 
-# --- LEADERBOARD HEATMAP ---
+# --- LEAGUE HEATMAP ---
 st.markdown('<div class="whiff-section-label">League Profile</div>', unsafe_allow_html=True)
 st.markdown("### Full-Season Whiff Density Heatmap")
 
@@ -130,24 +131,26 @@ fig_heat = go.Figure()
 fig_heat.add_trace(go.Histogram2dContour(
     x=pitch_data["plate_x"],
     y=pitch_data["plate_z"],
+    # Granular, colorblind-friendly Viridis variant with smooth alpha fades
     colorscale=[
-        [0.0, 'rgba(15, 23, 42, 0)'],      # Completely transparent background
-        [0.05, 'rgba(212, 169, 55, 0.2)'], # Soft gold entry
-        [0.2, '#d4a937'],                  # Gold ring
-        [0.5, '#c24141'],                  # Red hot ring
-        [1.0, '#7f1d1d']                   # Deep crimson epicenter
+        [0.0, 'rgba(15, 23, 42, 0)'],
+        [0.05, 'rgba(72, 40, 120, 0.2)'],
+        [0.2, 'rgba(60, 80, 140, 0.6)'],
+        [0.4, '#20908d'],
+        [0.7, '#5ec962'],
+        [1.0, '#fde725']
     ],
     reversescale=False,
-    ncontours=30,
+    ncontours=45, # Increased granularity
     line=dict(width=0),
     showscale=True,
-    colorbar=dict(title="Whiff Concentration")
+    colorbar=dict(title="Whiff Density")
 ))
 fig_heat.add_shape(type="rect", x0=-0.708, x1=0.708, y0=1.6, y1=3.4, line=dict(color="#f5efe3", width=3))
 fig_heat.update_layout(
     template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-    xaxis=dict(range=[-2.5, 2.5], title="Horizontal Plate Location (ft)", scaleanchor="y", scaleratio=1),
-    yaxis=dict(range=[0, 6], title="Vertical Plate Location (ft)"),
+    xaxis=dict(range=[-3, 3], title="Horizontal Plate Location (ft)", scaleanchor="y", scaleratio=1), # Fixed range
+    yaxis=dict(range=[0, 4.5], title="Vertical Plate Location (ft)"), # Fixed range
     height=600
 )
 st.plotly_chart(fig_heat, use_container_width=True)
@@ -159,8 +162,8 @@ trend["vol_roll"] = trend["vol"].rolling(7).mean()
 trend["ei_roll"] = trend["ei"].rolling(7).mean()
 
 fig_t = go.Figure()
-fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["vol_roll"], name="7-Day Vol", line=dict(color="#c24141")))
-fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["ei_roll"], name="7-Day Avg EI", line=dict(color="#d4a937"), yaxis="y2"))
+fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["vol_roll"], name="7-Day Vol", line=dict(color="#20908d")))
+fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["ei_roll"], name="7-Day Avg EI", line=dict(color="#fde725"), yaxis="y2"))
 fig_t.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis=dict(title="Volume"), yaxis2=dict(title="Avg EI", overlaying="y", side="right"), height=300)
 st.plotly_chart(fig_t, use_container_width=True)
 
@@ -175,7 +178,7 @@ pitch_splits = splits_df[splits_df["pitch_name"].isin(main_pitches)].groupby(["p
 fig_splits = go.Figure()
 for hand in ["Left", "Right"]:
     hand_df = pitch_splits[pitch_splits["Handedness"] == hand]
-    fig_splits.add_trace(go.Bar(x=hand_df["pitch_name"], y=hand_df["ei"], name=f"{hand}-Handed Hitters", marker_color="#d4a937" if hand == "Left" else "#c24141"))
+    fig_splits.add_trace(go.Bar(x=hand_df["pitch_name"], y=hand_df["ei"], name=f"{hand}-Handed Hitters", marker_color="#20908d" if hand == "Left" else "#440154"))
 fig_splits.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", barmode="group", yaxis_title="Avg EI", height=350, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
 st.plotly_chart(fig_splits, use_container_width=True)
 
@@ -197,6 +200,7 @@ st.dataframe(lb_display, use_container_width=True, hide_index=True)
 st.markdown('<div class="whiff-section-label">Worst Swings</div>', unsafe_allow_html=True)
 st.markdown("### Worst Whiffers")
 worst_df = pitch_data[pitch_data["zone_split"] == "Out of Zone"].sort_values("ei", ascending=False).head(25)
+# FIXED: Moved batter_name (Batter) to the first position in the column configuration
 st.dataframe(worst_df[["batter_name", "player_name", "pitch_name", "count", "runners_on", "miss_dist_in", "ei"]].rename(
     columns={"batter_name": "Batter", "player_name": "Pitcher", "pitch_name": "Pitch Type", "count": "Count", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
 ), use_container_width=True, hide_index=True)
@@ -215,8 +219,9 @@ with c_i:
 
 st.markdown('<div class="whiff-section-label">Player View</div>', unsafe_allow_html=True)
 st.markdown(f"### {sel_hitter}'s Top Whiffs")
-st.dataframe(p_whiffs[["player_name", "pitch_name", "runners_on", "miss_dist_in", "ei"]].sort_values("ei", ascending=False).head(10).rename(
-    columns={"player_name": "Pitcher", "pitch_name": "Pitch Type", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
+# FIXED: Included count immediately before runners_on
+st.dataframe(p_whiffs[["player_name", "pitch_name", "count", "runners_on", "miss_dist_in", "ei"]].sort_values("ei", ascending=False).head(10).rename(
+    columns={"player_name": "Pitcher", "pitch_name": "Pitch Type", "count": "Count", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
 ), use_container_width=True, hide_index=True)
 
 # --- INDIVIDUAL STRIKE ZONE ---
@@ -224,7 +229,7 @@ if not p_whiffs.empty:
     fig_sz = go.Figure()
     fig_sz.add_trace(go.Scatter(
         x=p_whiffs["plate_x"], y=p_whiffs["plate_z"], mode="markers", 
-        marker=dict(size=11, color=p_whiffs["ei"], colorscale="Cividis", showscale=True, colorbar=dict(title="EI")),
+        marker=dict(size=11, color=p_whiffs["ei"], colorscale="Viridis", showscale=True, colorbar=dict(title="EI")),
         customdata=p_whiffs[["player_name", "pitch_name", "runners_on", "count", "miss_dist_in", "ei"]],
         hovertemplate=(
             "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
@@ -237,5 +242,5 @@ if not p_whiffs.empty:
     ))
     avg_bot, avg_top = p_whiffs["sz_bot"].mean(), p_whiffs["sz_top"].mean()
     fig_sz.add_shape(type="rect", x0=-0.708, x1=0.708, y0=avg_bot, y1=avg_top, line=dict(color="#f5efe3", width=3))
-    fig_sz.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(range=[-2.5, 2.5], title="Horizontal (ft)", scaleanchor="y", scaleratio=1), yaxis=dict(range=[0, 6], title="Vertical (ft)"), height=750)
+    fig_sz.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(range=[-3, 3], title="Horizontal (ft)", scaleanchor="y", scaleratio=1), yaxis=dict(range=[0, 4.5], title="Vertical (ft)"), height=750)
     st.plotly_chart(fig_sz, use_container_width=True)
