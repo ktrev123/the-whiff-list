@@ -101,6 +101,44 @@ fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["ei_roll"], name="7-Day
 fig_t.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis=dict(title="Volume"), yaxis2=dict(title="Avg EI", overlaying="y", side="right"), height=300)
 st.plotly_chart(fig_t, use_container_width=True)
 
+# --- LEFT VS. RIGHT COMPARISON ---
+st.markdown('<div class="whiff-section-label">Platoon Splits</div>', unsafe_allow_html=True)
+st.markdown("### Left vs. Right Intensity Distribution")
+
+# Ensure we are looking at Out of Zone chases for fairness, grouped by Batter Handedness (stand)
+splits_df = pitch_data[pitch_data["zone_split"] == "Out of Zone"].copy()
+
+# Map 'L' and 'R' to cleaner display names
+splits_df["Handedness"] = splits_df["stand"].map({"L": "Left-Handed Hitter", "R": "Right-Handed Hitter"}).fillna(splits_df["stand"])
+
+fig_splits = go.Figure()
+
+# Add Box plot for each hand
+for hand in sorted(splits_df["Handedness"].dropna().unique()):
+    hand_data = splits_df[splits_df["Handedness"] == hand]
+    
+    fig_splits.add_trace(go.Box(
+        y=hand_data["ei"],
+        name=hand,
+        boxpoints="outliers", # Only show points that are extreme outliers to keep it clean
+        marker=dict(color="#d4a937" if "Left" in hand else "#c24141"),
+        line=dict(width=2),
+        notched=True # Notching shows confidence intervals around the median; highly statistical
+    ))
+
+fig_splits.update_layout(
+    template="plotly_dark",
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    yaxis_title="Embarrassment Index Distribution",
+    xaxis_title="Hitter Handedness",
+    height=400,
+    showlegend=False,
+    margin=dict(t=10, b=10)
+)
+
+st.plotly_chart(fig_splits, use_container_width=True)
+
 # --- LEADERBOARD ---
 st.sidebar.header("Filters")
 min_swings = st.sidebar.slider("Min Swings", 0, 100, 10, 5)
