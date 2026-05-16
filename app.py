@@ -8,7 +8,7 @@ st.set_page_config(
     page_title="The Whiff List",
     page_icon="💨",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # --- STYLING ---
@@ -71,7 +71,7 @@ df_base = load_leaderboard_data().copy()
 pitch_data = load_pitch_data().copy()
 pitch_data["game_date"] = pd.to_datetime(pitch_data["game_date"])
 
-# GLOBAL AB FILTER: 502 ABs for Batting Title Qualification
+# GLOBAL AB FILTER: Batting Title Qualifiers Only
 df_base = df_base[df_base["ab"] >= 502].copy()
 
 # Hard Date Cutoff (Mar 23 - Sept 27)
@@ -81,7 +81,7 @@ whiff_desc = {"swinging_strike", "swinging_strike_blocked", "missed_bunt"}
 pitch_data = pitch_data[pitch_data["description"].isin(whiff_desc)].copy()
 pitch_data = pitch_data.dropna(subset=["batter", "plate_x", "plate_z", "sz_top", "sz_bot"])
 
-# Global Inner Join filters out pitch rows for players below 502 ABs
+# Inner join filters pitch records down to validated 502 AB hitters
 name_lookup = df_base[["batter", "player_name"]].drop_duplicates().rename(columns={"player_name": "batter_name"})
 pitch_data = pitch_data.merge(name_lookup, on="batter", how="inner")
 
@@ -92,7 +92,7 @@ pitch_data["zone_split"] = np.where(pitch_data["miss_dist_in"] == 0, "In Zone", 
 pitch_data["runners_on"] = pitch_data[["on_1b", "on_2b", "on_3b"]].notna().sum(axis=1)
 pitch_data["count"] = pitch_data["balls"].fillna(0).astype(int).astype(str) + "-" + pitch_data["strikes"].fillna(0).astype(int).astype(str)
 
-# Formula scaled up to 100 max ceiling
+# Scaled formula out of 100 max capacity
 pitch_data["ei"] = ((100 / 0.85) * (0.45 * np.minimum(pitch_data["miss_dist_in"]/18, 1.0) + 
                                     0.20 * (pitch_data["zone_split"] == "Out of Zone").astype(float) + 
                                     0.20 * (pitch_data["runners_on"]/3.0))).round(1)
@@ -101,7 +101,6 @@ pitch_data["ei"] = ((100 / 0.85) * (0.45 * np.minimum(pitch_data["miss_dist_in"]
 st.title("The Whiff List 💨")
 st.markdown('<div class="whiff-subtle">Tracking the ugliest chase whiffs and repeat flails from the 2025 MLB season.</div>', unsafe_allow_html=True)
 
-# Batting Title Note
 st.info("📋 **Qualification Note:** The entire dataset is globally filtered to include only hitters with at least **502 At-Bats**, matching Major League Baseball's structural requirement for the season batting title.")
 
 # --- METHODOLOGY SECTION ---
@@ -190,17 +189,20 @@ for hand in ["Left", "Right"]:
 fig_splits.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", barmode="group", yaxis_title="Avg EI", height=350, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
 st.plotly_chart(fig_splits, use_container_width=True)
 
-# --- LEADERBOARD ---
-st.sidebar.header("Filters")
-min_swings = st.sidebar.slider("Min Swings", 0, 100, 10, 5)
-
+# --- LEADERBOARD & METRICS ---
 avg_ei_ozone = pitch_data[pitch_data["zone_split"] == "Out of Zone"].groupby("batter")["ei"].mean().reset_index().rename(columns={"ei": "avg_ei"})
-df_lb = df_base[df_base["swings"] >= min_swings].merge(avg_ei_ozone, on="batter", how="left").sort_values("avg_ei", ascending=False).reset_index(drop=True)
+df_lb = df_base.merge(avg_ei_ozone, on="batter", how="left").sort_values("avg_ei", ascending=False).reset_index(drop=True) # Removed min_swings logic
 df_lb["Rank"] = df_lb.index + 1
 df_lb["Whiff%"] = (df_lb["whiff_rate"] * 100).round(1)
 
 st.markdown('<div class="whiff-section-label">League View</div>', unsafe_allow_html=True)
 st.markdown("### Chase Leaderboard")
+
+# Pruned down to two clean layout tracking metrics
+m_col1, m_col2 = st.columns(2)
+m_col1.metric("Qualified Hitters", len(df_lb))
+m_col2.metric("Season Window", "Mar 23 - Sep 27")
+
 lb_display = df_lb[["Rank", "player_name", "ab", "swings", "whiffs", "Whiff%", "avg_ei"]].rename(columns={"player_name": "Batter", "ab": "ABs", "avg_ei": "Avg EI"})
 st.dataframe(lb_display, use_container_width=True, hide_index=True)
 
@@ -216,7 +218,7 @@ st.dataframe(worst_df[["batter_name", "player_name", "pitch_name", "count", "run
 st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
 p_list = sorted(pitch_data["batter_name"].dropna().unique())
 
-# FIXED: Select Hitter dropdown moved out of sidebar into main page body
+# On-page filter configuration selector
 selected_player_box = st.selectbox("Select Hitter for Performance Breakdown", p_list, index=p_list.index("Shohei Ohtani") if "Shohei Ohtani" in p_list else 0)
 p_whiffs = pitch_data[pitch_data["batter_name"] == selected_player_box].copy()
 
@@ -226,7 +228,7 @@ with c_i:
     pid = int(p_whiffs["batter"].iloc[0]) if not p_whiffs.empty else None
     if pid: st.image(f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{pid}/headshot/67/current", width=150)
 
-# FIXED: Individual Strike Zone Visual placed BEFORE the table
+# FIXED: Individual Strike Zone visual rendered BEFORE the raw dataframe
 if not p_whiffs.empty:
     fig_sz = go.Figure()
     fig_sz.add_trace(go.Scatter(
@@ -244,10 +246,18 @@ if not p_whiffs.empty:
     ))
     avg_bot, avg_top = p_whiffs["sz_bot"].mean(), p_whiffs["sz_top"].mean()
     fig_sz.add_shape(type="rect", x0=-0.708, x1=0.708, y0=avg_bot, y1=avg_top, line=dict(color="#f5efe3", width=3))
-    fig_sz.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(range=[-3, 3], title="Horizontal (ft)", scaleanchor="y", scaleratio=1), yaxis=dict(range=[0, 4.5], title="Vertical (ft)"), height=750)
+    
+    # FIXED: Added explicit margin adjustments to pull chart up closer to headshots
+    fig_sz.update_layout(
+        template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", 
+        xaxis=dict(range=[-3, 3], title="Horizontal (ft)", scaleanchor="y", scaleratio=1), 
+        yaxis=dict(range=[0, 4.5], title="Vertical (ft)"), 
+        height=750,
+        margin=dict(t=10, b=10, l=0, r=0)
+    )
     st.plotly_chart(fig_sz, use_container_width=True)
 
-# FIXED: Player View Table header and data rendered below the chart
+# FIXED: Player View DataFrame tables display at the absolute bottom of the script layout
 st.markdown('<div class="whiff-section-label">Player View</div>', unsafe_allow_html=True)
 st.markdown(f"### {selected_player_box}'s Top Whiffs")
 st.dataframe(p_whiffs[["player_name", "pitch_name", "count", "runners_on", "miss_dist_in", "ei"]].sort_values("ei", ascending=False).head(10).rename(
