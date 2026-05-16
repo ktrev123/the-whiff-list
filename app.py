@@ -71,14 +71,12 @@ df_base = load_leaderboard_data().copy()
 pitch_data = load_pitch_data().copy()
 pitch_data["game_date"] = pd.to_datetime(pitch_data["game_date"])
 
-# Hard Date Cutoff (Mar 23 - Sept 27)
 pitch_data = pitch_data[(pitch_data["game_date"] >= "2025-03-23") & (pitch_data["game_date"] <= "2025-09-27")].copy()
 
 whiff_desc = {"swinging_strike", "swinging_strike_blocked", "missed_bunt"}
 pitch_data = pitch_data[pitch_data["description"].isin(whiff_desc)].copy()
 pitch_data = pitch_data.dropna(subset=["batter", "plate_x", "plate_z", "sz_top", "sz_bot"])
 
-# Global Logic
 name_lookup = df_base[["batter", "player_name"]].drop_duplicates().rename(columns={"player_name": "batter_name"})
 pitch_data = pitch_data.merge(name_lookup, on="batter", how="left")
 pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
@@ -88,7 +86,6 @@ pitch_data["zone_split"] = np.where(pitch_data["miss_dist_in"] == 0, "In Zone", 
 pitch_data["runners_on"] = pitch_data[["on_1b", "on_2b", "on_3b"]].notna().sum(axis=1)
 pitch_data["count"] = pitch_data["balls"].fillna(0).astype(int).astype(str) + "-" + pitch_data["strikes"].fillna(0).astype(int).astype(str)
 
-# EI Score
 pitch_data["ei"] = (100 * (0.45 * np.minimum(pitch_data["miss_dist_in"]/18, 1.0) + 
                           0.20 * (pitch_data["zone_split"] == "Out of Zone").astype(float) + 
                           0.20 * (pitch_data["runners_on"]/3.0))).round(1)
@@ -105,10 +102,11 @@ with st.container():
     st.markdown("""
     <div class="methodology-box">
         <h4>Why evaluate Whiff Quality?</h4>
-        <p>Standard box-score metrics treat every swing-and-miss identically. However, a whiff on a borderline sinking fastball is 
-        fundamentally different from an uncompetitive chase on a slider two feet outside the zone. The <b>Embarrassment Index (EI)</b> 
-        is a context-aware tracking metric designed to isolate non-competitive, high-leverage plate discipline failures.</p>
-        <h4>How it is calculated:</h4>
+        <p>Standard box-score metrics treat every swing-and-miss identically. But let's be real: protecting the plate on a borderline sinking 
+        fastball is just a professional hazard. Swinging and missing on a pitch 17 inches out of the zone when the count is 3-2 with 
+        your teammates desperately needing you on base? That's... <b>embarrassing</b>.</p>
+        <p>The <b>Embarrassment Index (EI)</b> is a context-aware tracking metric designed to isolate non-competitive, high-leverage plate 
+        discipline failures from structural swing-and-miss tendencies.</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -124,23 +122,27 @@ with st.container():
 
 st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
 
-# --- LEAGUE HEATMAP (The Whole Dataset) ---
+# --- LEADERBOARD HEATMAP ---
 st.markdown('<div class="whiff-section-label">League Profile</div>', unsafe_allow_html=True)
 st.markdown("### Full-Season Whiff Density Heatmap")
 
 fig_heat = go.Figure()
-# Generate 2D Contour Density Map
 fig_heat.add_trace(go.Histogram2dContour(
     x=pitch_data["plate_x"],
     y=pitch_data["plate_z"],
-    colorscale="YlOrRd",
+    colorscale=[
+        [0.0, 'rgba(15, 23, 42, 0)'],      # Completely transparent background
+        [0.05, 'rgba(212, 169, 55, 0.2)'], # Soft gold entry
+        [0.2, '#d4a937'],                  # Gold ring
+        [0.5, '#c24141'],                  # Red hot ring
+        [1.0, '#7f1d1d']                   # Deep crimson epicenter
+    ],
     reversescale=False,
     ncontours=30,
     line=dict(width=0),
     showscale=True,
     colorbar=dict(title="Whiff Concentration")
 ))
-# Standard league strike zone boundary overlay
 fig_heat.add_shape(type="rect", x0=-0.708, x1=0.708, y0=1.6, y1=3.4, line=dict(color="#f5efe3", width=3))
 fig_heat.update_layout(
     template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -217,7 +219,7 @@ st.dataframe(p_whiffs[["player_name", "pitch_name", "runners_on", "miss_dist_in"
     columns={"player_name": "Pitcher", "pitch_name": "Pitch Type", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
 ), use_container_width=True, hide_index=True)
 
-# --- INDIVIDUAL STRIKE ZONE + FIXED TOOLTIPS ---
+# --- INDIVIDUAL STRIKE ZONE ---
 if not p_whiffs.empty:
     fig_sz = go.Figure()
     fig_sz.add_trace(go.Scatter(
