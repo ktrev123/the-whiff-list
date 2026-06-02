@@ -231,6 +231,7 @@ def _examples_table_html(examples: list[dict]) -> str:
         rows += f"""
         <tr>
           <td>{ex['label']}</td>
+          <td>{ex.get('pitch_type', '—')}</td>
           <td>{ex['count']}</td>
           <td>{ex['runners_on']}</td>
           <td>{ex['swing_prob_pct']}%</td>
@@ -244,7 +245,7 @@ def _examples_table_html(examples: list[dict]) -> str:
     <table>
       <thead>
         <tr>
-          <th>Scenario</th><th>Count</th><th>Runners</th>
+          <th>Scenario</th><th>Pitch</th><th>Count</th><th>Runners</th>
           <th>P(swing)</th><th>P(whiff|swing)</th><th>P(swing &amp; whiff)</th>
           <th>Swing takeaway</th><th>Whiff takeaway</th>
         </tr>
@@ -296,7 +297,7 @@ def export_training_report(
                 build_pred_grid_figure(
                     swing_grid,
                     "pred_swing_prob",
-                    "Swing map (2-2, league-average zone)",
+                    "Swing map (2-2 count, FF profile, league-average zone)",
                     "P(swing)",
                 )
             )
@@ -316,7 +317,7 @@ def export_training_report(
                 build_pred_grid_figure(
                     whiff_grid,
                     "pred_whiff_prob",
-                    "Whiff-if-swing map (2-2, league-average zone)",
+                    "Whiff-if-swing map (2-2 count, FF profile, league-average zone)",
                     "P(whiff|swing)",
                 )
             )

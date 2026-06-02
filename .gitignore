@@ -216,3 +216,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- The Whiff List: generated / large data ---
+data/statcast_2025.parquet
+data/raw_parquet/
+data/statcast_test_*.csv
+data/model/*.joblib
+data/model/*.parquet
+data/model/charts/
+data/model/model_report.html
+data/model/pitch_predictions_test.parquet
+
+# Keep small derived outputs for portfolio demo (uncomment to ignore):
+# data/whiff_leaderboard_2025.csv
+# data/model/model_insights.json
+# data/model/model_metrics.json
+# data/model/batter_predictions.csv

@@ -1,26 +1,42 @@
 # The Whiff List
 
-The Whiff List is an interactive Streamlit app built with Statcast pitch-level data from `pybaseball` to identify the biggest swing-and-miss offenders of the 2025 MLB season.
+The Whiff List is an interactive Streamlit app built with Statcast pitch-level data from `pybaseball` to identify swing-and-miss tendencies and pitch-level whiff risk for the 2025 MLB season.
 
-## Project goal
+## Features
 
-This project ranks MLB hitters by swing-and-miss tendencies using pitch-level Statcast data and interactive filters.
-
-## Planned features
-
-- 2025 leaderboard of highest whiff-rate hitters
-- Filters for minimum swings, pitch type, count, and handedness
-- Player-level breakdowns by pitch type and zone
-- A fun, portfolio-friendly presentation layer
+- Embarrassment Index leaderboard for qualified hitters (502+ AB)
+- League whiff heatmaps, seasonal trends, and platoon pitch thermometers
+- Dual predictive models: **P(swing)** and **P(whiff | swing)** with pitch-physics features
+- HTML model report generated after training
 
 ## Tech stack
 
-- Python
-- Streamlit
-- pandas
-- pybaseball
-- Plotly
+- Python, Streamlit, pandas, pybaseball, Plotly, scikit-learn
 
-## Status
+## Setup
 
-In progress
+```bash
+pip install -r requirements.txt
+```
+
+## Data pipeline
+
+Large Statcast files are **not** in git. Regenerate locally:
+
+```bash
+python notebooks/statcast_pull.py
+python notebooks/build_whiff_leaderboard.py
+python notebooks/train_whiff_model.py
+```
+
+Training opens `data/model/model_report.html` with ROC, calibration, and heatmap visuals.
+
+## Run the app
+
+```bash
+streamlit run app.py
+```
+
+## Report
+
+See [docs/predictive-whiff-report-outline.md](docs/predictive-whiff-report-outline.md) for the data science write-up structure.

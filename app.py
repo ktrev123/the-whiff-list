@@ -489,21 +489,23 @@ else:
     with tab_combo:
         st.markdown("#### Example pitches — both models together")
         examples = pd.DataFrame(insights["example_pitches"])
+        example_cols = [
+            "label",
+            "pitch_type",
+            "count",
+            "runners_on",
+            "swing_prob_pct",
+            "whiff_if_swing_pct",
+            "swing_whiff_pct",
+            "swing_takeaway",
+            "whiff_takeaway",
+        ]
+        example_cols = [c for c in example_cols if c in examples.columns]
         st.dataframe(
-            examples[
-                [
-                    "label",
-                    "count",
-                    "runners_on",
-                    "swing_prob_pct",
-                    "whiff_if_swing_pct",
-                    "swing_whiff_pct",
-                    "swing_takeaway",
-                    "whiff_takeaway",
-                ]
-            ].rename(
+            examples[example_cols].rename(
                 columns={
                     "label": "Scenario",
+                    "pitch_type": "Pitch type",
                     "count": "Count",
                     "runners_on": "Runners on",
                     "swing_prob_pct": "P(swing) %",

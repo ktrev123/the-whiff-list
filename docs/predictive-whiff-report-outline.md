@@ -2,109 +2,144 @@
 
 ## Statistical Question
 
-> **Given an incoming pitch's location, ball-metrics, and count, can we train a classification model to accurately estimate the probability of a hitter A.) swinging and B.) missing (whiffing)?**
+> **Given an incoming pitch's characteristics (velocity, location, spin, movement, pitch type) and situational context (count, runners on), can classification models accurately estimate (A) the probability that a hitter swings and (B) the probability that a swing results in a miss (whiff)?**
 
 ---
 
 ## I. Executive Summary
 
-### The Problem
+### Problem Statement
 
-In baseball analytics, evaluating a hitter's plate discipline traditionally relies on backward-looking volume metrics (like overall Whiff%). Teams need a way to simulate and project an upcoming matchup to determine precisely which incoming pitches a hitter is most likely to wildly chase.
+Season-long metrics such as overall Whiff% summarize what already happened but do not answer pitch-level questions: *Will this hitter swing at a 1–2 Sweeper off the plate with runners on, and if he does, will he miss?*
 
-### The Objective
+### Approach
 
-Build a predictive classification model that estimates pitch-level swing-and-miss probabilities while using intuitive data visualizations to make the risk profiles instantly clear to non-baseball users.
+Two linked classifiers on 2025 Statcast data — **Model A (swing)** on all pitches and **Model B (whiff | swing)** on swings only — using location, count, leverage, and pitch-physics features. Results are validated on a September holdout and presented in The Whiff List dashboard and HTML model report.
+
+### Key Results
+
+- [Swing model ROC-AUC / Log Loss — September holdout]
+- [Whiff model ROC-AUC / Log Loss — September holdout]
+- [Top feature drivers including pitch type, velocity, movement, spin]
 
 ---
 
 ## II. Data Pipeline & Feature Engineering
 
-### Ingestion & Filter
+### Data Source & Sample
 
-- Extract pitch-level Statcast data using `pybaseball`
-- Filter for the **502 At-Bat batting title qualification** baseline to eliminate small-sample noise
+- **Source:** MLB Statcast via `pybaseball` (`notebooks/statcast_pull.py`)
+- **Season:** March 23 – September 27, 2025
+- **Qualification:** Batters with ≥ 502 AB
+- **Unit of analysis:** Individual pitch
 
-### Target Variable Formulation
+### Target Variables
 
-Define the binary target variable:
+| Model | Label | Y = 1 | Y = 0 | Training rows |
+|-------|-------|-------|-------|---------------|
+| **(A) Swing** | `is_swing` | Batter swings | Batter takes | All pitches |
+| **(B) Whiff** | `is_whiff` | Swinging strike / missed bunt | Contact or foul | Swings only |
 
-- **Y = 1** — swinging strike / missed bunt
-- **Y = 0** — all other pitch outcomes
+Combined swinging-strike risk: **P(swing) × P(whiff | swing)**
 
-### Feature Generation
+### Feature Groups (Model Inputs)
 
-Create predictive inputs from raw Statcast coordinates:
+Both models share the same feature matrix (`src/whiff_features.py`):
 
-| Category | Features |
-|----------|----------|
-| **Spatial** | `plate_x`, `plate_z`, raw distance from the customized strike zone boundary |
-| **Contextual** | Current count (balls, strikes), base-runner leverage (`runners_on`) |
+| Category | Columns | Notes |
+|----------|---------|-------|
+| **Spatial** | `plate_x`, `plate_z`, `miss_dist_in` | `miss_dist_in` = inches from strike zone boundary (uses `sz_top`, `sz_bot`) |
+| **Contextual** | `balls`, `strikes`, `runners_on` | `runners_on` aggregated from `on_1b`, `on_2b`, `on_3b` |
+| **Pitch identity** | `pitch_type` | One-hot encoded (FF, SL, SV, CH, CU, etc.) |
+| **Velocity** | `release_speed`, `effective_speed` | mph |
+| **Movement** | `pfx_x`, `pfx_z` | Horizontal and vertical break |
+| **Spin** | `release_spin_rate`, `spin_axis` | rpm and degrees |
+| **Deception** | `release_extension` | Release extension (ft) |
+
+Missing pitch-physics values are imputed with **training-set medians** (fit on April–August only, applied to train and test).
+
+### Excluded from Features
+
+- **Outcomes:** `description`, `events`, launch metrics, `woba_value` (target leakage)
+- **Player IDs:** `batter`, `pitcher`, `player_name` (reserved for dashboard joins, not model inputs in this version)
+- **Deprecated Statcast fields:** `spin_rate_deprecated`, `break_angle_deprecated`, etc.
 
 ---
 
-## III. Exploratory Data Analysis (The "Non-Baseball" Context Layer)
+## III. Exploratory Data Analysis
 
 ### League Whiff Topography
 
-Use a **2D density contour heatmap** to show exactly where the high-risk "danger zones" live relative to the strike zone, bypassing confusing coordinate numbers for the reader.
+2D density heatmap of whiff locations relative to the strike zone (Streamlit app).
 
 ### Temporal Stability
 
-Analyze the **7-day rolling average of league chase volume** to verify that player eagerness metrics remain stable enough over a six-month season to support a predictive model.
+7-day rolling average of out-of-zone chase volume across the season.
+
+### Platoon & Pitch-Type Context
+
+Chase thermometers by pitch type and batter handedness (Embarrassment Index).
 
 ---
 
 ## IV. Model Development & Evaluation
 
-### Algorithm Selection
+### Algorithms
 
-Implement a binary classifier:
+| Model | Candidates | Preprocessing |
+|-------|------------|---------------|
+| Swing & Whiff | Logistic Regression, Random Forest | StandardScaler on numeric features; OneHotEncoder on `pitch_type` |
 
-- **Logistic Regression** — baseline interpretability
-- **XGBoost / Random Forest** — non-linear boundary relationships
+Best candidate selected by **ROC-AUC** on the September holdout.
 
-### Validation Strategy
+### Validation
 
-Split regular season data **chronologically** (e.g., train on April–August, test on September) to simulate true "future" prediction rather than a random split.
+| Split | Period |
+|-------|--------|
+| Train | April – August 2025 |
+| Test | September 2025 |
+
+Chronological split (no random shuffle).
 
 ### Metrics
 
-| Metric | Purpose |
-|--------|---------|
-| **ROC-AUC** | Measure probability sorting — how well the model separates high-risk swings from low-risk takes |
-| **Log Loss** | Penalize overconfident wrong predictions |
-
-*Plain-language framing:* how well the model separates an emergency flail from a disciplined take.
+| Metric | Interpretation |
+|--------|----------------|
+| **ROC-AUC** | Ranking quality — separates positive outcomes from negatives |
+| **Log Loss** | Probability calibration — lower is better |
 
 ---
 
-## V. Model Interpretation & Visual Dashboard Integration
+## V. Model Interpretation & Dashboard
 
 ### Feature Importance
 
-Show which factors (e.g., distance from the plate vs. the count) matter most when predicting a miss.
+Encoded feature importances (including pitch-type dummies) exported to `data/model/model_insights.json` and the HTML report.
 
-### The Application — "The Whiff List"
+### Deliverables
 
-Showcase how the live Streamlit dashboard operationalizes the model:
-
-1. **Leaderboard** — ranks hitters by their overall predicted vulnerability
-2. **Player Scatter Plot** — acts as a visual "risk map," where color-coded points don't just show historical whiffs, but map out the exact coordinates where the model projects a hitter is entirely defenseless
+1. **HTML report** — opens automatically after `train_whiff_model.py` (ROC, calibration, heatmaps, scenarios)
+2. **Streamlit app** — Predictive Model section with the same diagnostics
+3. **Example scenarios** — P(swing), P(whiff|swing), P(swing & whiff) for labeled pitch profiles (e.g. 1–2 Sweeper chase)
 
 ---
 
-## VI. Conclusion & Future Iterations
+## VI. Conclusion & Future Work
 
-### Key Takeaways
+### Summary
 
-Summarize how predictive modeling can anticipate plate-discipline failures before a game even starts.
+Pitch-level swing and whiff models that include **location, count, leverage, and pitch physics** provide actionable estimates beyond season-long Whiff%.
 
-### Next Steps
+### Future Work
 
-Expand model features to include physical pitch characteristics:
+- Hitter- and pitcher-specific features or embeddings for personalized matchup profiles
+- Sequence features (`pitch_number`, prior pitch type) for tunneling effects
+- Handedness interactions (`stand`, `p_throws`)
 
-- Spin rate
-- Vertical / horizontal break vectors
+---
 
-These additions would map out exact player structural blindspots and refine pitch-level whiff probability estimates.
+## Appendix
+
+- `notebooks/statcast_pull.py` — data ingestion
+- `notebooks/train_whiff_model.py` — training + HTML report
+- `data/model/model_report.html` — visual output after training

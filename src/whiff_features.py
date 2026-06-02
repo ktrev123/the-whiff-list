@@ -1,4 +1,4 @@
-"""Shared feature engineering for whiff probability modeling."""
+"""Shared feature engineering for swing and whiff probability modeling."""
 
 import numpy as np
 import pandas as pd
@@ -17,14 +17,32 @@ SWING_DESCRIPTIONS = {
     "hit_into_play_score",
 }
 
-FEATURE_COLS = [
+PITCH_METRIC_COLS = [
+    "release_speed",
+    "effective_speed",
+    "pfx_x",
+    "pfx_z",
+    "release_spin_rate",
+    "spin_axis",
+    "release_extension",
+]
+
+CATEGORICAL_FEATURE_COLS = ["pitch_type"]
+
+NUMERIC_FEATURE_COLS = [
     "plate_x",
     "plate_z",
     "miss_dist_in",
     "balls",
     "strikes",
     "runners_on",
+    *PITCH_METRIC_COLS,
 ]
+
+MODEL_INPUT_COLS = NUMERIC_FEATURE_COLS + CATEGORICAL_FEATURE_COLS
+
+# Backward-compatible alias used by training scripts and saved artifacts.
+FEATURE_COLS = MODEL_INPUT_COLS
 
 TRAIN_CUTOFF = pd.Timestamp("2025-09-01")
 
@@ -46,6 +64,32 @@ def engineer_features(df):
     out["strikes"] = out["strikes"].fillna(0).astype("int8")
     out["is_whiff"] = out["description"].isin(WHIFF_DESCRIPTIONS).astype("int8")
     out["is_swing"] = out["description"].isin(SWING_DESCRIPTIONS).astype("int8")
+    if "pitch_type" in out.columns:
+        out["pitch_type"] = out["pitch_type"].fillna("UNK").astype(str)
+    for col in PITCH_METRIC_COLS:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce").astype("float32")
+    return out
+
+
+def compute_pitch_medians(train_df: pd.DataFrame) -> pd.Series:
+    return train_df[PITCH_METRIC_COLS].median(numeric_only=True)
+
+
+def pitch_profile_defaults(train_df: pd.DataFrame, pitch_type: str) -> dict:
+    subset = train_df[train_df["pitch_type"] == pitch_type]
+    if subset.empty:
+        subset = train_df
+    return subset[PITCH_METRIC_COLS].median(numeric_only=True).to_dict()
+
+
+def apply_pitch_imputation(df: pd.DataFrame, medians: pd.Series) -> pd.DataFrame:
+    out = df.copy()
+    if "pitch_type" in out.columns:
+        out["pitch_type"] = out["pitch_type"].fillna("UNK").astype(str)
+    for col in PITCH_METRIC_COLS:
+        out[col] = pd.to_numeric(out[col], errors="coerce").astype("float32")
+        out[col] = out[col].fillna(float(medians[col]))
     return out
 
 

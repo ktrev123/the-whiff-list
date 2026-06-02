@@ -11,11 +11,31 @@ FEATURE_LABELS = {
     "balls": "Balls in the count",
     "strikes": "Strikes in the count",
     "runners_on": "Runners on base",
+    "release_speed": "Release velocity (mph)",
+    "effective_speed": "Effective velocity (mph)",
+    "pfx_x": "Horizontal break",
+    "pfx_z": "Vertical break",
+    "release_spin_rate": "Spin rate (rpm)",
+    "spin_axis": "Spin axis (degrees)",
+    "release_extension": "Release extension (ft)",
+    "pitch_type": "Pitch type",
 }
+
+
+def friendly_feature_name(encoded_name: str) -> str:
+    if encoded_name.startswith("num__"):
+        raw = encoded_name.replace("num__", "", 1)
+        return FEATURE_LABELS.get(raw, raw)
+    if encoded_name.startswith("cat__pitch_type_"):
+        code = encoded_name.replace("cat__pitch_type_", "", 1)
+        return f"Pitch type: {code}"
+    return encoded_name
+
 
 EXAMPLE_SCENARIOS = [
     {
         "label": "Paint at 2-2, bases empty",
+        "pitch_type": "FF",
         "plate_x": 0.35,
         "plate_z": 2.8,
         "balls": 2,
@@ -24,6 +44,7 @@ EXAMPLE_SCENARIOS = [
     },
     {
         "label": "1-2 Sweeper chase (12 in. off plate)",
+        "pitch_type": "SV",
         "plate_x": 1.2,
         "plate_z": 1.4,
         "balls": 1,
@@ -32,6 +53,7 @@ EXAMPLE_SCENARIOS = [
     },
     {
         "label": "3-2 bailout chase with runners on",
+        "pitch_type": "SL",
         "plate_x": -0.9,
         "plate_z": 0.9,
         "balls": 3,
@@ -40,6 +62,7 @@ EXAMPLE_SCENARIOS = [
     },
     {
         "label": "0-0 heater down the middle",
+        "pitch_type": "FF",
         "plate_x": 0.0,
         "plate_z": 2.5,
         "balls": 0,
@@ -89,7 +112,7 @@ def interpret_log_loss(loss: float, base_rate: float, outcome: str) -> str:
 def swing_output_summary() -> str:
     return (
         "**Model A (Swing):** For every pitch, outputs the probability the batter **swings** "
-        "(contact, foul, or whiff) based on location, count, and leverage. "
+        "based on location, count, leverage, and pitch characteristics (type, velocity, movement, spin). "
         "Answers: *'Will he offer at this pitch?'*"
     )
 
@@ -97,8 +120,8 @@ def swing_output_summary() -> str:
 def whiff_output_summary() -> str:
     return (
         "**Model B (Whiff):** Trained only on pitches the batter **already swung at**. "
-        "Outputs the probability that swing ends in a **miss** (swinging strike). "
-        "Answers: *'If he swings, will he whiff?'*"
+        "Outputs the probability that swing ends in a **miss**, using the same location, count, "
+        "and pitch-physics inputs. Answers: *'If he swings, will he whiff?'*"
     )
 
 

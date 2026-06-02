@@ -13,15 +13,15 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss, roc_auc_score, roc_curve
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.model_insights import (
     EXAMPLE_SCENARIOS,
-    FEATURE_LABELS,
     combined_output_summary,
+    friendly_feature_name,
     interpret_log_loss,
     interpret_roc_auc,
     interpret_swing_probability_plain,
@@ -31,7 +31,16 @@ from src.model_insights import (
     whiff_output_summary,
 )
 from src.model_viz import export_training_report
-from src.whiff_features import FEATURE_COLS, chronological_split, engineer_features, filter_modeling_frame
+from src.whiff_features import (
+    MODEL_INPUT_COLS,
+    NUMERIC_FEATURE_COLS,
+    apply_pitch_imputation,
+    chronological_split,
+    compute_pitch_medians,
+    engineer_features,
+    filter_modeling_frame,
+    pitch_profile_defaults,
+)
 
 DATA_FILE = ROOT / "data" / "statcast_2025.parquet"
 LEADERBOARD_FILE = ROOT / "data" / "whiff_leaderboard_2025.csv"
@@ -55,45 +64,67 @@ def load_qualified_batters():
     return lb.loc[lb["ab"] >= MIN_ABS, "batter"].astype(int).tolist()
 
 
+def build_preprocessor():
+    return ColumnTransformer(
+        [
+            ("num", StandardScaler(), NUMERIC_FEATURE_COLS),
+            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), ["pitch_type"]),
+        ]
+    )
+
+
 def build_models():
+    preprocessor = build_preprocessor()
     return {
         "logistic_regression": Pipeline(
             [
-                (
-                    "scale",
-                    ColumnTransformer(
-                        [("num", StandardScaler(), FEATURE_COLS)],
-                        remainder="drop",
-                    ),
-                ),
+                ("prep", preprocessor),
                 (
                     "clf",
                     LogisticRegression(max_iter=1000, class_weight="balanced"),
                 ),
             ]
         ),
-        "random_forest": RandomForestClassifier(
-            n_estimators=200,
-            max_depth=12,
-            min_samples_leaf=50,
-            class_weight="balanced_subsample",
-            random_state=42,
-            n_jobs=-1,
+        "random_forest": Pipeline(
+            [
+                ("prep", preprocessor),
+                (
+                    "clf",
+                    RandomForestClassifier(
+                        n_estimators=200,
+                        max_depth=12,
+                        min_samples_leaf=50,
+                        class_weight="balanced_subsample",
+                        random_state=42,
+                        n_jobs=-1,
+                    ),
+                ),
+            ]
         ),
     }
 
 
+def encoded_feature_names(model) -> list[str]:
+    return model.named_steps["prep"].get_feature_names_out().tolist()
+
+
 def feature_importance(model, model_name):
+    names = encoded_feature_names(model)
     if model_name == "random_forest":
-        values = model.feature_importances_
+        values = model.named_steps["clf"].feature_importances_
     else:
         values = np.abs(model.named_steps["clf"].coef_[0])
-    return dict(sorted(zip(FEATURE_COLS, values.round(4).tolist()), key=lambda x: x[1], reverse=True))
+    ranked = sorted(zip(names, values), key=lambda x: x[1], reverse=True)
+    return {
+        friendly_feature_name(name): round(float(val), 4)
+        for name, val in ranked
+    }
 
 
-def build_prediction_grid(train_df):
+def build_prediction_grid(train_df, pitch_type="FF"):
     avg_bot = float(train_df["sz_bot"].mean())
     avg_top = float(train_df["sz_top"].mean())
+    pitch_defaults = pitch_profile_defaults(train_df, pitch_type)
     xs = np.linspace(-2.5, 2.5, 50)
     zs = np.linspace(0.5, 4.5, 50)
     rows = []
@@ -107,13 +138,17 @@ def build_prediction_grid(train_df):
                     "sz_top": avg_top,
                     "balls": 2,
                     "strikes": 2,
+                    "pitch_type": pitch_type,
                     "on_1b": pd.NA,
                     "on_2b": pd.NA,
                     "on_3b": pd.NA,
                     "description": "placeholder",
+                    **pitch_defaults,
                 }
             )
-    return engineer_features(pd.DataFrame(rows))
+    grid = engineer_features(pd.DataFrame(rows))
+    medians = compute_pitch_medians(train_df)
+    return apply_pitch_imputation(grid, medians)
 
 
 def build_calibration_bins(scored: pd.DataFrame, prob_col: str, target_col: str, n_bins: int = 10) -> list[dict]:
@@ -199,7 +234,7 @@ def build_model_insights(
             "log_loss": interpret_log_loss(loss, base_rate, outcome_label),
         },
         "feature_importance": [
-            {"feature": feat, "label": FEATURE_LABELS.get(feat, feat), "importance": float(val)}
+            {"feature": feat, "label": feat, "importance": float(val)}
             for feat, val in importance.items()
         ],
         "roc_curve": {
@@ -214,7 +249,7 @@ def build_model_insights(
     }
 
 
-def build_example_scenarios(swing_model, whiff_model, train_df) -> list[dict]:
+def build_example_scenarios(swing_model, whiff_model, train_df, medians) -> list[dict]:
     avg_bot = float(train_df["sz_bot"].mean())
     avg_top = float(train_df["sz_top"].mean())
     rows = []
@@ -222,23 +257,26 @@ def build_example_scenarios(swing_model, whiff_model, train_df) -> list[dict]:
         on_1b = 1 if scenario["runners_on"] >= 1 else pd.NA
         on_2b = 2 if scenario["runners_on"] >= 2 else pd.NA
         on_3b = 3 if scenario["runners_on"] >= 3 else pd.NA
+        pitch_defaults = pitch_profile_defaults(train_df, scenario["pitch_type"])
         rows.append(
             {
                 "plate_x": scenario["plate_x"],
                 "plate_z": scenario["plate_z"],
                 "balls": scenario["balls"],
                 "strikes": scenario["strikes"],
+                "pitch_type": scenario["pitch_type"],
                 "sz_bot": avg_bot,
                 "sz_top": avg_top,
                 "on_1b": on_1b,
                 "on_2b": on_2b,
                 "on_3b": on_3b,
                 "description": "placeholder",
+                **pitch_defaults,
             }
         )
-    frame = engineer_features(pd.DataFrame(rows))
-    swing_probs = swing_model.predict_proba(frame[FEATURE_COLS])[:, 1]
-    whiff_probs = whiff_model.predict_proba(frame[FEATURE_COLS])[:, 1]
+    frame = apply_pitch_imputation(engineer_features(pd.DataFrame(rows)), medians)
+    swing_probs = swing_model.predict_proba(frame[MODEL_INPUT_COLS])[:, 1]
+    whiff_probs = whiff_model.predict_proba(frame[MODEL_INPUT_COLS])[:, 1]
 
     examples = []
     for scenario, p_swing, p_whiff in zip(EXAMPLE_SCENARIOS, swing_probs, whiff_probs):
@@ -246,6 +284,7 @@ def build_example_scenarios(swing_model, whiff_model, train_df) -> list[dict]:
         examples.append(
             {
                 "label": scenario["label"],
+                "pitch_type": scenario["pitch_type"],
                 "count": f"{scenario['balls']}-{scenario['strikes']}",
                 "runners_on": scenario["runners_on"],
                 "swing_prob_pct": round(float(p_swing) * 100, 1),
@@ -279,9 +318,14 @@ def main():
     qualified = load_qualified_batters()
     frame = filter_modeling_frame(raw, qualified)
     train_df, test_df = chronological_split(frame)
+    pitch_medians = compute_pitch_medians(train_df)
+    train_df = apply_pitch_imputation(train_df, pitch_medians)
+    test_df = apply_pitch_imputation(test_df, pitch_medians)
 
     train_swings = train_df[train_df["is_swing"] == 1].copy()
     test_swings = test_df[test_df["is_swing"] == 1].copy()
+
+    print(f"Features: {MODEL_INPUT_COLS}")
 
     print(f"All pitches — train: {len(train_df):,} | test: {len(test_df):,}")
     print(f"Swing rate — train: {train_df['is_swing'].mean():.3%} | test: {test_df['is_swing'].mean():.3%}")
@@ -292,26 +336,38 @@ def main():
 
     print("\n=== Model A: Swing (all pitches) ===")
     swing_name, swing_model, swing_results, swing_probs = train_best_model(
-        train_df[FEATURE_COLS],
+        train_df[MODEL_INPUT_COLS],
         train_df["is_swing"],
-        test_df[FEATURE_COLS],
+        test_df[MODEL_INPUT_COLS],
         test_df["is_swing"],
     )
 
     print("\n=== Model B: Whiff (swings only) ===")
     whiff_name, whiff_model, whiff_results, whiff_probs = train_best_model(
-        train_swings[FEATURE_COLS],
+        train_swings[MODEL_INPUT_COLS],
         train_swings["is_whiff"],
-        test_swings[FEATURE_COLS],
+        test_swings[MODEL_INPUT_COLS],
         test_swings["is_whiff"],
     )
 
     joblib.dump(
-        {"model": swing_model, "model_name": swing_name, "features": FEATURE_COLS, "target": "is_swing"},
+        {
+            "model": swing_model,
+            "model_name": swing_name,
+            "features": MODEL_INPUT_COLS,
+            "pitch_medians": pitch_medians.to_dict(),
+            "target": "is_swing",
+        },
         SWING_MODEL_FILE,
     )
     joblib.dump(
-        {"model": whiff_model, "model_name": whiff_name, "features": FEATURE_COLS, "target": "is_whiff_given_swing"},
+        {
+            "model": whiff_model,
+            "model_name": whiff_name,
+            "features": MODEL_INPUT_COLS,
+            "pitch_medians": pitch_medians.to_dict(),
+            "target": "is_whiff_given_swing",
+        },
         WHIFF_MODEL_FILE,
     )
 
@@ -352,8 +408,9 @@ def main():
         },
         "swing": swing_insights,
         "whiff": whiff_insights,
-        "example_pitches": build_example_scenarios(swing_model, whiff_model, train_df),
+        "example_pitches": build_example_scenarios(swing_model, whiff_model, train_df, pitch_medians),
     }
+    insights_payload["feature_columns"] = MODEL_INPUT_COLS
     INSIGHTS_FILE.write_text(json.dumps(insights_payload, indent=2), encoding="utf-8")
 
     metrics_payload = {
@@ -367,14 +424,23 @@ def main():
             "test_period": TEST_START,
             "qualified_batters_min_ab": MIN_ABS,
         },
-        "swing_model": {"selected": swing_name, "candidates": swing_results},
-        "whiff_model": {"selected": whiff_name, "candidates": whiff_results, "trained_on": "swings_only"},
+        "swing_model": {
+            "selected": swing_name,
+            "candidates": swing_results,
+            "features": MODEL_INPUT_COLS,
+        },
+        "whiff_model": {
+            "selected": whiff_name,
+            "candidates": whiff_results,
+            "trained_on": "swings_only",
+            "features": MODEL_INPUT_COLS,
+        },
     }
     METRICS_FILE.write_text(json.dumps(metrics_payload, indent=2), encoding="utf-8")
 
     test_scored = test_df.copy()
     test_scored["pred_swing_prob"] = swing_probs
-    test_scored["pred_whiff_prob"] = whiff_model.predict_proba(test_df[FEATURE_COLS])[:, 1]
+    test_scored["pred_whiff_prob"] = whiff_model.predict_proba(test_df[MODEL_INPUT_COLS])[:, 1]
     test_scored["pred_swing_whiff_prob"] = (
         test_scored["pred_swing_prob"] * test_scored["pred_whiff_prob"]
     )
@@ -394,9 +460,9 @@ def main():
     )
     batter_preds.to_csv(BATTER_PRED_FILE, index=False)
 
-    grid = build_prediction_grid(train_df)
-    grid["pred_swing_prob"] = swing_model.predict_proba(grid[FEATURE_COLS])[:, 1]
-    grid["pred_whiff_prob"] = whiff_model.predict_proba(grid[FEATURE_COLS])[:, 1]
+    grid = build_prediction_grid(train_df, pitch_type="FF")
+    grid["pred_swing_prob"] = swing_model.predict_proba(grid[MODEL_INPUT_COLS])[:, 1]
+    grid["pred_whiff_prob"] = whiff_model.predict_proba(grid[MODEL_INPUT_COLS])[:, 1]
     grid["pred_swing_whiff_prob"] = grid["pred_swing_prob"] * grid["pred_whiff_prob"]
     grid.to_parquet(SWING_GRID_FILE, index=False)
     grid.to_parquet(WHIFF_GRID_FILE, index=False)
