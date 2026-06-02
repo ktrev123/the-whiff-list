@@ -222,6 +222,8 @@ data/statcast_2025.parquet
 data/raw_parquet/
 data/statcast_test_*.csv
 data/model/*.joblib
+!data/model/pitch_lab_swing.joblib
+!data/model/pitch_lab_whiff.joblib
 data/model/*.parquet
 data/model/charts/
 data/model/model_report.html

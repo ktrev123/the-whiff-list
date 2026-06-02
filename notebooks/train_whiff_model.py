@@ -34,6 +34,7 @@ from src.model_viz import export_training_report
 from src.whiff_features import (
     MODEL_INPUT_COLS,
     NUMERIC_FEATURE_COLS,
+    PITCH_METRIC_COLS,
     SEASON_END,
     SEASON_START,
     apply_pitch_imputation,
@@ -55,6 +56,10 @@ BATTER_PRED_FILE = MODEL_DIR / "batter_predictions.csv"
 PITCH_PRED_FILE = MODEL_DIR / "pitch_predictions_test.parquet"
 SWING_GRID_FILE = MODEL_DIR / "league_swing_grid.parquet"
 WHIFF_GRID_FILE = MODEL_DIR / "league_whiff_grid.parquet"
+PITCH_LAB_SWING_FILE = MODEL_DIR / "pitch_lab_swing.joblib"
+PITCH_LAB_WHIFF_FILE = MODEL_DIR / "pitch_lab_whiff.joblib"
+PITCH_LAB_PROFILES_FILE = MODEL_DIR / "pitch_lab_profiles.json"
+PITCH_LAB_ZONES_FILE = MODEL_DIR / "pitch_lab_hitter_zones.csv"
 
 MIN_ABS = 502
 TRAIN_END = "April–August 2025"
@@ -173,6 +178,81 @@ def build_calibration_bins(scored: pd.DataFrame, prob_col: str, target_col: str,
         }
         for row in cal.itertuples()
     ]
+
+
+def export_pitch_lab_bundle(model, model_name, target, pitch_medians, path):
+    joblib.dump(
+        {
+            "model": model,
+            "model_name": model_name,
+            "features": MODEL_INPUT_COLS,
+            "pitch_medians": pitch_medians.to_dict(),
+            "target": target,
+        },
+        path,
+    )
+
+
+def fit_logistic_model(x_train, y_train):
+    preprocessor = build_preprocessor()
+    model = Pipeline(
+        [
+            ("prep", preprocessor),
+            ("clf", LogisticRegression(max_iter=1000, class_weight="balanced")),
+        ]
+    )
+    model.fit(x_train, y_train)
+    return model
+
+
+def export_pitch_lab_artifacts(train_df, train_swings, pitch_medians, qualified):
+    swing_lr = fit_logistic_model(train_df[MODEL_INPUT_COLS], train_df["is_swing"])
+    whiff_lr = fit_logistic_model(
+        train_swings[MODEL_INPUT_COLS],
+        train_swings["is_whiff"],
+    )
+    export_pitch_lab_bundle(
+        swing_lr,
+        "logistic_regression",
+        "is_swing",
+        pitch_medians,
+        PITCH_LAB_SWING_FILE,
+    )
+    export_pitch_lab_bundle(
+        whiff_lr,
+        "logistic_regression",
+        "is_whiff_given_swing",
+        pitch_medians,
+        PITCH_LAB_WHIFF_FILE,
+    )
+
+    profiles = (
+        train_df.groupby("pitch_type", as_index=False)[PITCH_METRIC_COLS]
+        .median(numeric_only=True)
+        .set_index("pitch_type")
+        .to_dict(orient="index")
+    )
+    profiles_payload = {
+        "league_sz_bot": round(float(train_df["sz_bot"].median()), 4),
+        "league_sz_top": round(float(train_df["sz_top"].median()), 4),
+        "pitch_types": {
+            pitch_type: {col: round(float(val), 4) for col, val in metrics.items()}
+            for pitch_type, metrics in profiles.items()
+        },
+    }
+    PITCH_LAB_PROFILES_FILE.write_text(
+        json.dumps(profiles_payload, indent=2),
+        encoding="utf-8",
+    )
+
+    zones = (
+        train_df[train_df["batter"].isin(qualified)]
+        .groupby("batter", as_index=False)
+        .agg(sz_bot=("sz_bot", "median"), sz_top=("sz_top", "median"))
+    )
+    zones["sz_bot"] = zones["sz_bot"].round(4)
+    zones["sz_top"] = zones["sz_top"].round(4)
+    zones.to_csv(PITCH_LAB_ZONES_FILE, index=False)
 
 
 def train_best_model(x_train, y_train, x_test, y_test):
@@ -461,6 +541,9 @@ def main():
         .sort_values("mean_pred_swing_whiff", ascending=False)
     )
     batter_preds.to_csv(BATTER_PRED_FILE, index=False)
+
+    export_pitch_lab_artifacts(train_df, train_swings, pitch_medians, qualified)
+    print(f"Saved Pitch Lab deploy bundle: {PITCH_LAB_SWING_FILE.name}, {PITCH_LAB_WHIFF_FILE.name}")
 
     grid = build_prediction_grid(train_df, pitch_type="FF")
     grid["pred_swing_prob"] = swing_model.predict_proba(grid[MODEL_INPUT_COLS])[:, 1]

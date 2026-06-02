@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import joblib
@@ -10,7 +11,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.statcast_schema import SEASON_END, SEASON_START
 from src.whiff_features import (
     MODEL_INPUT_COLS,
     PITCH_METRIC_COLS,
@@ -19,8 +19,14 @@ from src.whiff_features import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-SWING_MODEL_FILE = ROOT / "data" / "model" / "swing_model.joblib"
-WHIFF_MODEL_FILE = ROOT / "data" / "model" / "whiff_model.joblib"
+MODEL_DIR = ROOT / "data" / "model"
+PITCH_LAB_SWING_FILE = MODEL_DIR / "pitch_lab_swing.joblib"
+PITCH_LAB_WHIFF_FILE = MODEL_DIR / "pitch_lab_whiff.joblib"
+SWING_MODEL_FILE = MODEL_DIR / "swing_model.joblib"
+WHIFF_MODEL_FILE = MODEL_DIR / "whiff_model.joblib"
+PITCH_LAB_PROFILES_FILE = MODEL_DIR / "pitch_lab_profiles.json"
+PITCH_LAB_ZONES_FILE = MODEL_DIR / "pitch_lab_hitter_zones.csv"
+STATCAST_FILE = ROOT / "data" / "statcast_2025.parquet"
 
 PITCH_NAME_TO_TYPE = {
     "4-Seam Fastball": "FF",
@@ -48,28 +54,62 @@ def load_model_bundle(path: Path):
     return joblib.load(path)
 
 
-@st.cache_data
-def load_full_statcast() -> pd.DataFrame:
-    path = ROOT / "data" / "statcast_2025.parquet"
-    df = pd.read_parquet(path)
-    df["game_date"] = pd.to_datetime(df["game_date"])
-    return df[(df["game_date"] >= SEASON_START) & (df["game_date"] <= SEASON_END)].copy()
+@st.cache_resource
+def load_pitch_lab_models():
+    """Prefer lightweight deploy bundles; fall back to full RF models locally."""
+    for swing_path, whiff_path in (
+        (PITCH_LAB_SWING_FILE, PITCH_LAB_WHIFF_FILE),
+        (SWING_MODEL_FILE, WHIFF_MODEL_FILE),
+    ):
+        swing_bundle = load_model_bundle(swing_path)
+        whiff_bundle = load_model_bundle(whiff_path)
+        if swing_bundle is not None and whiff_bundle is not None:
+            return swing_bundle, whiff_bundle
+    return None, None
 
 
 @st.cache_data
-def league_pitch_profiles(pitch_data: pd.DataFrame) -> pd.DataFrame:
+def load_pitch_lab_profiles() -> dict:
+    if PITCH_LAB_PROFILES_FILE.exists():
+        return json.loads(PITCH_LAB_PROFILES_FILE.read_text(encoding="utf-8"))
+
+    if not STATCAST_FILE.exists():
+        return {"league_sz_bot": 1.5, "league_sz_top": 3.5, "pitch_types": {}}
+
+    df = pd.read_parquet(STATCAST_FILE, columns=["pitch_type", "sz_bot", "sz_top", *PITCH_METRIC_COLS])
     grouped = (
-        pitch_data.groupby("pitch_type", as_index=False)[PITCH_METRIC_COLS]
+        df.groupby("pitch_type", as_index=False)[PITCH_METRIC_COLS]
         .median(numeric_only=True)
+        .set_index("pitch_type")
+        .to_dict(orient="index")
     )
-    return grouped
+    return {
+        "league_sz_bot": float(df["sz_bot"].median()),
+        "league_sz_top": float(df["sz_top"].median()),
+        "pitch_types": grouped,
+    }
 
 
-def hitter_strike_zone(pitch_data: pd.DataFrame, batter_id: int) -> tuple[float, float]:
-    subset = pitch_data[pitch_data["batter"] == batter_id]
-    if subset.empty:
-        subset = pitch_data
-    return float(subset["sz_bot"].median()), float(subset["sz_top"].median())
+@st.cache_data
+def load_hitter_strike_zones() -> pd.DataFrame:
+    if PITCH_LAB_ZONES_FILE.exists():
+        return pd.read_csv(PITCH_LAB_ZONES_FILE)
+
+    if not STATCAST_FILE.exists():
+        return pd.DataFrame(columns=["batter", "sz_bot", "sz_top"])
+
+    df = pd.read_parquet(STATCAST_FILE, columns=["batter", "sz_bot", "sz_top"])
+    return (
+        df.groupby("batter", as_index=False)
+        .agg(sz_bot=("sz_bot", "median"), sz_top=("sz_top", "median"))
+    )
+
+
+def hitter_strike_zone(zones_df: pd.DataFrame, profiles: dict, batter_id: int) -> tuple[float, float]:
+    match = zones_df.loc[zones_df["batter"] == batter_id]
+    if not match.empty:
+        return float(match.iloc[0]["sz_bot"]), float(match.iloc[0]["sz_top"])
+    return float(profiles["league_sz_bot"]), float(profiles["league_sz_top"])
 
 
 def build_pitch_row(
@@ -184,23 +224,27 @@ def guess_label(prob: float, guess_yes: bool) -> str:
 
 
 def render_pitch_lab(qualified_df: pd.DataFrame) -> None:
-    swing_bundle = load_model_bundle(SWING_MODEL_FILE)
-    whiff_bundle = load_model_bundle(WHIFF_MODEL_FILE)
+    swing_bundle, whiff_bundle = load_pitch_lab_models()
 
     if swing_bundle is None or whiff_bundle is None:
-        st.info("Train models first: `python notebooks/train_whiff_model.py`")
+        st.info(
+            "Pitch Lab models are not bundled for deploy yet. From the project folder run:\n\n"
+            "`python notebooks/train_whiff_model.py`\n\n"
+            "Then commit `data/model/pitch_lab_*.joblib` and push."
+        )
         return
 
-    statcast = load_full_statcast()
-    profiles = league_pitch_profiles(statcast)
-    profile_lookup = profiles.set_index("pitch_type").to_dict("index")
+    profiles = load_pitch_lab_profiles()
+    zones_df = load_hitter_strike_zones()
+    profile_lookup = profiles.get("pitch_types", {})
 
     if "lab_px" not in st.session_state:
         st.session_state.lab_px = 0.85
         st.session_state.lab_pz = 1.35
 
+    model_note = swing_bundle.get("model_name", "model")
     st.markdown(
-        """
+        f"""
         <div class="methodology-box">
             <h4>Pitch Lab — build a pitch, make your call</h4>
             <p>Pick a hitter and pitch, set the count, place the ball on the zone (click the chart or use sliders),
@@ -209,6 +253,7 @@ def render_pitch_lab(qualified_df: pd.DataFrame) -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.caption(f"Live predictions use deployable **{model_note}** models bundled with the app.")
 
     hitters = qualified_df.sort_values("player_name")["player_name"].tolist()
     default_idx = hitters.index("Shohei Ohtani") if "Shohei Ohtani" in hitters else 0
@@ -220,13 +265,13 @@ def render_pitch_lab(qualified_df: pd.DataFrame) -> None:
         batter_id = int(
             qualified_df.loc[qualified_df["player_name"] == hitter, "batter"].iloc[0]
         )
-        sz_bot, sz_top = hitter_strike_zone(statcast, batter_id)
+        sz_bot, sz_top = hitter_strike_zone(zones_df, profiles, batter_id)
 
         pitch_name = st.selectbox("Pick the pitch", list(PITCH_NAME_TO_TYPE.keys()), key="lab_pitch")
         pitch_type = PITCH_NAME_TO_TYPE[pitch_name]
         pitch_profile = profile_lookup.get(pitch_type, {})
         if not pitch_profile:
-            pitch_profile = statcast[PITCH_METRIC_COLS].median(numeric_only=True).to_dict()
+            pitch_profile = {col: float(profiles.get(col, 0)) for col in PITCH_METRIC_COLS}
 
         st.caption("Count & leverage")
         c1, c2, c3 = st.columns(3)
@@ -287,7 +332,7 @@ def render_pitch_lab(qualified_df: pd.DataFrame) -> None:
     st.caption(
         f"Pitch physics default to league-median **{pitch_name}** "
         f"({pitch_profile.get('release_speed', 0):.1f} mph). "
-        "Models are league-average — hitter choice sets context, not batter-specific coefficients yet."
+        "Models are league-average — hitter choice sets zone size and context."
     )
 
     st.markdown("#### Your guess")
