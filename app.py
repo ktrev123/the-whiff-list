@@ -1,7 +1,18 @@
-import streamlit as st
-import pandas as pd
+import json
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
+
+from src.model_viz import (
+    build_batter_pred_figure,
+    build_calibration_figure,
+    build_importance_figure,
+    build_pred_grid_figure,
+    build_roc_figure,
+)
 
 # --- PAGE CONFIG ---
 st.set_page_config(
@@ -180,6 +191,70 @@ def build_ei_thermometer(pitch_ei_df, handedness, title):
     )
     return fig
 
+
+MODEL_DIR = Path("data/model")
+INSIGHTS_FILE = MODEL_DIR / "model_insights.json"
+BATTER_PRED_FILE = MODEL_DIR / "batter_predictions.csv"
+GRID_PRED_FILE = MODEL_DIR / "league_whiff_grid.parquet"
+SWING_GRID_FILE = MODEL_DIR / "league_swing_grid.parquet"
+
+
+@st.cache_data
+def load_model_insights():
+    if INSIGHTS_FILE.exists():
+        return json.loads(INSIGHTS_FILE.read_text(encoding="utf-8"))
+    return None
+
+
+@st.cache_data
+def load_batter_predictions():
+    if BATTER_PRED_FILE.exists():
+        return pd.read_csv(BATTER_PRED_FILE)
+    return None
+
+
+@st.cache_data
+def load_pred_grid():
+    if GRID_PRED_FILE.exists():
+        return pd.read_parquet(GRID_PRED_FILE)
+    return None
+
+
+@st.cache_data
+def load_swing_grid():
+    if SWING_GRID_FILE.exists():
+        return pd.read_parquet(SWING_GRID_FILE)
+    if GRID_PRED_FILE.exists():
+        return pd.read_parquet(GRID_PRED_FILE)
+    return None
+
+
+def render_model_panel(block, rate_label):
+    """One model's metrics, plain-English copy, and diagnostic charts."""
+    st.markdown(block["layman"]["what_it_outputs"])
+    if block.get("training_note"):
+        st.caption(block["training_note"])
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("ROC-AUC", f"{block['roc_auc']:.2f}")
+    c2.metric("Log Loss", f"{block['log_loss']:.3f}")
+    c3.metric(f"September {rate_label}", f"{block['test_positive_rate'] * 100:.1f}%")
+    c4.metric("Algorithm", block["selected_model"].replace("_", " ").title())
+
+    st.markdown(block["layman"]["roc_auc"])
+    st.markdown(block["layman"]["log_loss"])
+
+    v1, v2 = st.columns(2)
+    with v1:
+        st.plotly_chart(build_roc_figure(block), use_container_width=True)
+        st.caption("Yellow line above the dashed diagonal = better than random guessing.")
+    with v2:
+        st.plotly_chart(build_calibration_figure(block), use_container_width=True)
+        st.caption("Points on the dashed line = predicted % matches what actually happened.")
+
+    st.plotly_chart(build_importance_figure(block), use_container_width=True)
+
+
 # --- DATA PROCESSING ---
 df_base = load_leaderboard_data().copy()
 pitch_data = load_pitch_data().copy()
@@ -313,6 +388,138 @@ with therm_right:
         build_ei_thermometer(pitch_splits, "Right", "Right-Handed Hitters"),
         use_container_width=True,
     )
+
+# --- PREDICTIVE MODEL (PLAIN ENGLISH) ---
+st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
+st.markdown('<div class="whiff-section-label">Predictive Model</div>', unsafe_allow_html=True)
+st.markdown("### Swing & Whiff Models — Plain English")
+st.caption(
+    "Scroll to this section after training. Visuals appear below in tabs: "
+    "**Model A (Swing)**, **Model B (Whiff)**, and **Combined scenarios**."
+)
+
+insights = load_model_insights()
+batter_preds = load_batter_predictions()
+pred_grid = load_pred_grid()
+swing_grid = load_swing_grid()
+
+if insights is None:
+    st.warning(
+        "No model insights found. From the project folder run:\n\n"
+        "`python notebooks/train_whiff_model.py`\n\n"
+        "Then refresh this page (R in Streamlit)."
+    )
+elif "swing" not in insights:
+    st.warning(
+        "Your saved insights are from the old single-model run. Re-run "
+        "`python notebooks/train_whiff_model.py` to train **both** swing and whiff models."
+    )
+else:
+    st.markdown(
+        f"""
+        <div class="methodology-box">
+            <h4>Two-step question</h4>
+            <p>{insights['layman']['validation']}</p>
+            <p>{insights['layman']['combined']}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    tab_swing, tab_whiff, tab_combo = st.tabs(
+        ["Model A — Swing rate", "Model B — Whiff rate (if he swings)", "Combined scenarios"]
+    )
+
+    with tab_swing:
+        st.markdown("#### (A) Will the hitter swing?")
+        render_model_panel(insights["swing"], "swing rate")
+        if swing_grid is not None and "pred_swing_prob" in swing_grid.columns:
+            st.plotly_chart(
+                build_pred_grid_figure(
+                    swing_grid,
+                    "pred_swing_prob",
+                    "Swing probability map (2-2 count, league-average zone)",
+                    "P(swing)",
+                ),
+                use_container_width=True,
+            )
+        if batter_preds is not None and "mean_pred_swing" in batter_preds.columns:
+            name_lookup_pred = df_base[["batter", "player_name"]].drop_duplicates()
+            st.plotly_chart(
+                build_batter_pred_figure(
+                    batter_preds,
+                    name_lookup_pred,
+                    "actual_swing_rate",
+                    "mean_pred_swing",
+                    "Actual swing % (September)",
+                    "Predicted swing %",
+                    "September: predicted vs. actual swing rate",
+                ),
+                use_container_width=True,
+            )
+
+    with tab_whiff:
+        st.markdown("#### (B) If he swings, will he miss?")
+        render_model_panel(insights["whiff"], "whiff rate (swings only)")
+        if pred_grid is not None and "pred_whiff_prob" in pred_grid.columns:
+            st.plotly_chart(
+                build_pred_grid_figure(
+                    pred_grid,
+                    "pred_whiff_prob",
+                    "Whiff-if-swing map (2-2 count, league-average zone)",
+                    "P(whiff|swing)",
+                ),
+                use_container_width=True,
+            )
+        if batter_preds is not None and "mean_pred_whiff" in batter_preds.columns:
+            name_lookup_pred = df_base[["batter", "player_name"]].drop_duplicates()
+            st.plotly_chart(
+                build_batter_pred_figure(
+                    batter_preds,
+                    name_lookup_pred,
+                    "actual_whiff_rate",
+                    "mean_pred_whiff",
+                    "Actual whiff % (September, all pitches)",
+                    "Predicted whiff-if-swing %",
+                    "September: predicted vs. actual whiff rate",
+                ),
+                use_container_width=True,
+            )
+
+    with tab_combo:
+        st.markdown("#### Example pitches — both models together")
+        examples = pd.DataFrame(insights["example_pitches"])
+        st.dataframe(
+            examples[
+                [
+                    "label",
+                    "count",
+                    "runners_on",
+                    "swing_prob_pct",
+                    "whiff_if_swing_pct",
+                    "swing_whiff_pct",
+                    "swing_takeaway",
+                    "whiff_takeaway",
+                ]
+            ].rename(
+                columns={
+                    "label": "Scenario",
+                    "count": "Count",
+                    "runners_on": "Runners on",
+                    "swing_prob_pct": "P(swing) %",
+                    "whiff_if_swing_pct": "P(whiff|swing) %",
+                    "swing_whiff_pct": "P(swing & whiff) %",
+                    "swing_takeaway": "Swing takeaway",
+                    "whiff_takeaway": "Whiff takeaway",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "P(swing & whiff) = P(swing) × P(whiff | swing). "
+            "That is the estimated chance of a swinging strike on this pitch profile."
+        )
 
 # --- LEADERBOARD ---
 st.markdown('<div class="whiff-section-label">League View</div>', unsafe_allow_html=True)

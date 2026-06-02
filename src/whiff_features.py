@@ -5,6 +5,18 @@ import pandas as pd
 
 WHIFF_DESCRIPTIONS = {"swinging_strike", "swinging_strike_blocked", "missed_bunt"}
 
+SWING_DESCRIPTIONS = {
+    "swinging_strike",
+    "swinging_strike_blocked",
+    "missed_bunt",
+    "foul",
+    "foul_tip",
+    "foul_bunt",
+    "hit_into_play",
+    "hit_into_play_no_out",
+    "hit_into_play_score",
+}
+
 FEATURE_COLS = [
     "plate_x",
     "plate_z",
@@ -33,6 +45,7 @@ def engineer_features(df):
     out["balls"] = out["balls"].fillna(0).astype("int8")
     out["strikes"] = out["strikes"].fillna(0).astype("int8")
     out["is_whiff"] = out["description"].isin(WHIFF_DESCRIPTIONS).astype("int8")
+    out["is_swing"] = out["description"].isin(SWING_DESCRIPTIONS).astype("int8")
     return out
 
 
