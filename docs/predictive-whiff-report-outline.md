@@ -19,7 +19,7 @@
 
 Season-long metrics such as overall Whiff% are easy to quote but hard to act on. They summarize what already happened across thousands of pitches; they do not answer the question a fan in the stands, a broadcaster, or a front-office analyst actually asks before the next pitch is thrown: *Will this hitter swing, and if he does, will he miss?*
 
-Consider a concrete matchup: with runners on and the count 1–2, will Aaron Judge swing at a Sweeper that finishes a foot off the plate? A single season Whiff% cannot express that pitch-by-pitch risk. Stakeholders at every level — from casual viewers following the competition to dugout staff and player-development groups — need estimates tied to **location, pitch type, count, and leverage**, not just a hitter's annual average.
+With runners on and the count 1–2, will Aaron Judge swing at a Sweeper that finishes a foot off the plate? A single season Whiff% cannot express that pitch-by-pitch risk. Stakeholders at every level — from casual viewers following the competition to dugout staff and player-development groups — need estimates tied to **location, pitch type, count, and leverage**, not just a hitter's annual average.
 
 ### Approach
 
