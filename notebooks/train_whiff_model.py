@@ -34,6 +34,8 @@ from src.model_viz import export_training_report
 from src.whiff_features import (
     MODEL_INPUT_COLS,
     NUMERIC_FEATURE_COLS,
+    SEASON_END,
+    SEASON_START,
     apply_pitch_imputation,
     chronological_split,
     compute_pitch_medians,
@@ -313,7 +315,7 @@ def main():
 
     raw = pd.read_parquet(DATA_FILE)
     raw["game_date"] = pd.to_datetime(raw["game_date"])
-    raw = raw[(raw["game_date"] >= "2025-03-23") & (raw["game_date"] <= "2025-09-27")]
+    raw = raw[(raw["game_date"] >= SEASON_START) & (raw["game_date"] <= SEASON_END)]
 
     qualified = load_qualified_batters()
     frame = filter_modeling_frame(raw, qualified)

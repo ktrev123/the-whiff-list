@@ -13,6 +13,8 @@ from src.model_viz import (
     build_pred_grid_figure,
     build_roc_figure,
 )
+from src.pitch_simulator import render_pitch_lab
+from src.whiff_features import SEASON_END, SEASON_START
 
 # --- PAGE CONFIG ---
 st.set_page_config(
@@ -264,7 +266,7 @@ pitch_data["game_date"] = pd.to_datetime(pitch_data["game_date"])
 df_base = df_base[df_base["ab"] >= 502].copy()
 
 # Hard Date Cutoff
-pitch_data = pitch_data[(pitch_data["game_date"] >= "2025-03-23") & (pitch_data["game_date"] <= "2025-09-27")].copy()
+pitch_data = pitch_data[(pitch_data["game_date"] >= SEASON_START) & (pitch_data["game_date"] <= SEASON_END)].copy()
 
 whiff_desc = {"swinging_strike", "swinging_strike_blocked", "missed_bunt"}
 pitch_data = pitch_data[pitch_data["description"].isin(whiff_desc)].copy()
@@ -522,6 +524,12 @@ else:
             "P(swing & whiff) = P(swing) × P(whiff | swing). "
             "That is the estimated chance of a swinging strike on this pitch profile."
         )
+
+# --- PITCH LAB ---
+st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
+st.markdown('<div class="whiff-section-label">Pitch Lab</div>', unsafe_allow_html=True)
+st.markdown("### Interactive Swing & Whiff Simulator")
+render_pitch_lab(df_base)
 
 # --- LEADERBOARD ---
 st.markdown('<div class="whiff-section-label">League View</div>', unsafe_allow_html=True)

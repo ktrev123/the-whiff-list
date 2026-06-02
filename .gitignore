@@ -227,7 +227,8 @@ data/model/charts/
 data/model/model_report.html
 data/model/pitch_predictions_test.parquet
 
-# Keep small derived outputs for portfolio demo (uncomment to ignore):
+# Statcast pull cache metadata
+data/raw_parquet/*.meta
 # data/whiff_leaderboard_2025.csv
 # data/model/model_insights.json
 # data/model/model_metrics.json

@@ -29,7 +29,7 @@ Two linked classifiers on 2025 Statcast data — **Model A (swing)** on all pitc
 ### Data Source & Sample
 
 - **Source:** MLB Statcast via `pybaseball` (`notebooks/statcast_pull.py`)
-- **Season:** March 23 – September 27, 2025
+- **Season:** March 27 – September 28, 2025 (regular season only; `game_type = R`)
 - **Qualification:** Batters with ≥ 502 AB
 - **Unit of analysis:** Individual pitch
 
@@ -70,15 +70,9 @@ Missing pitch-physics values are imputed with **training-set medians** (fit on A
 
 ### League Whiff Topography
 
-2D density heatmap of whiff locations relative to the strike zone (Streamlit app).
-
 ### Temporal Stability
 
-7-day rolling average of out-of-zone chase volume across the season.
-
 ### Platoon & Pitch-Type Context
-
-Chase thermometers by pitch type and batter handedness (Embarrassment Index).
 
 ---
 
@@ -86,27 +80,9 @@ Chase thermometers by pitch type and batter handedness (Embarrassment Index).
 
 ### Algorithms
 
-| Model | Candidates | Preprocessing |
-|-------|------------|---------------|
-| Swing & Whiff | Logistic Regression, Random Forest | StandardScaler on numeric features; OneHotEncoder on `pitch_type` |
-
-Best candidate selected by **ROC-AUC** on the September holdout.
-
 ### Validation
 
-| Split | Period |
-|-------|--------|
-| Train | April – August 2025 |
-| Test | September 2025 |
-
-Chronological split (no random shuffle).
-
 ### Metrics
-
-| Metric | Interpretation |
-|--------|----------------|
-| **ROC-AUC** | Ranking quality — separates positive outcomes from negatives |
-| **Log Loss** | Probability calibration — lower is better |
 
 ---
 
@@ -114,13 +90,7 @@ Chronological split (no random shuffle).
 
 ### Feature Importance
 
-Encoded feature importances (including pitch-type dummies) exported to `data/model/model_insights.json` and the HTML report.
-
 ### Deliverables
-
-1. **HTML report** — opens automatically after `train_whiff_model.py` (ROC, calibration, heatmaps, scenarios)
-2. **Streamlit app** — Predictive Model section with the same diagnostics
-3. **Example scenarios** — P(swing), P(whiff|swing), P(swing & whiff) for labeled pitch profiles (e.g. 1–2 Sweeper chase)
 
 ---
 
@@ -128,18 +98,6 @@ Encoded feature importances (including pitch-type dummies) exported to `data/mod
 
 ### Summary
 
-Pitch-level swing and whiff models that include **location, count, leverage, and pitch physics** provide actionable estimates beyond season-long Whiff%.
-
 ### Future Work
 
-- Hitter- and pitcher-specific features or embeddings for personalized matchup profiles
-- Sequence features (`pitch_number`, prior pitch type) for tunneling effects
-- Handedness interactions (`stand`, `p_throws`)
-
 ---
-
-## Appendix
-
-- `notebooks/statcast_pull.py` — data ingestion
-- `notebooks/train_whiff_model.py` — training + HTML report
-- `data/model/model_report.html` — visual output after training

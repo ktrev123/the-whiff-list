@@ -1,10 +1,19 @@
+import sys
+from pathlib import Path
+
 import pandas as pd
 from pybaseball import playerid_reverse_lookup
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from src.statcast_schema import filter_season_dates
 
 input_file = "data/statcast_2025.parquet"
 output_file = "data/whiff_leaderboard_2025.csv"
 
 df = pd.read_parquet(input_file)
+df = filter_season_dates(df)
 
 swing_descriptions = {
     "swinging_strike",
@@ -90,10 +99,8 @@ else:
 leaderboard = leaderboard.merge(
     name_lookup[["batter", "player_name"]],
     on="batter",
-    how="left"
+    how="inner",
 )
-
-leaderboard["player_name"] = leaderboard["player_name"].fillna("Unknown")
 
 leaderboard = leaderboard.sort_values(
     ["whiff_rate", "whiffs"],
