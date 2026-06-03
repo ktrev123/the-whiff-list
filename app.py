@@ -525,11 +525,102 @@ else:
             "That is the estimated chance of a swinging strike on this pitch profile."
         )
 
+# --- PLAYER BREAKDOWN ---
+st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
+st.markdown('<div class="whiff-section-label">Player Breakdown</div>', unsafe_allow_html=True)
+p_list = sorted(pitch_data["batter_name"].dropna().unique())
+
+col_control, col_headshot = st.columns([3, 1])
+
+with col_control:
+    selected_player_box = st.selectbox(
+        "Select Hitter for Performance Breakdown",
+        p_list,
+        index=p_list.index("Shohei Ohtani") if "Shohei Ohtani" in p_list else 0,
+    )
+    p_whiffs = pitch_data[pitch_data["batter_name"] == selected_player_box].copy()
+    p_whiffs["date_str"] = p_whiffs["game_date"].dt.strftime("%m-%d")
+
+    st.markdown(f"### {selected_player_box}")
+
+    sub_m1, sub_m2, sub_m3 = st.columns(3)
+    sub_m1.metric("Total Whiffs Detected", len(p_whiffs))
+    sub_m2.metric("Out-of-Zone Chases", len(p_whiffs[p_whiffs["zone_split"] == "Out of Zone"]))
+    sub_m3.metric("Player Peak EI", f"{p_whiffs['ei'].max():.0f}" if not p_whiffs.empty else "0")
+
+with col_headshot:
+    pid = int(p_whiffs["batter"].iloc[0]) if not p_whiffs.empty else None
+    if pid:
+        st.image(
+            f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{pid}/headshot/67/current",
+            width=145,
+        )
+
+if not p_whiffs.empty:
+    fig_sz = go.Figure()
+    fig_sz.add_trace(
+        go.Scatter(
+            x=p_whiffs["plate_x"],
+            y=p_whiffs["plate_z"],
+            mode="markers",
+            marker=dict(size=11, color=p_whiffs["ei"], colorscale="Viridis", showscale=True, colorbar=dict(title="EI")),
+            customdata=p_whiffs[["player_name", "pitch_name", "runners_on", "count", "miss_dist_in", "ei", "date_str"]],
+            hovertemplate=(
+                "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
+                "Date: %{customdata[6]}<br>"
+                "Count: %{customdata[3]}<br>"
+                "Runners On: %{customdata[2]}<br>"
+                "Miss Distance: %{customdata[4]:.0f} in<br>"
+                "Embarrassment Index: %{customdata[5]:.0f}<br>"
+                "<extra></extra>"
+            ),
+        )
+    )
+    avg_bot, avg_top = p_whiffs["sz_bot"].mean(), p_whiffs["sz_top"].mean()
+    fig_sz.add_shape(type="rect", x0=-0.708, x1=0.708, y0=avg_bot, y1=avg_top, line=dict(color="#f5efe3", width=3))
+    fig_sz.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(range=[-3, 3], title="Horizontal (catcher's view: ← 3B | 1B →)", scaleanchor="y", scaleratio=1),
+        yaxis=dict(range=[0, 4.5], title="Vertical (ft)"),
+        height=720,
+        margin=dict(t=5, b=5, l=0, r=0),
+    )
+    st.plotly_chart(fig_sz, use_container_width=True)
+
+st.markdown('<div class="whiff-section-label">Player View</div>', unsafe_allow_html=True)
+st.markdown(f"### {selected_player_box}'s Top Whiffs")
+st.dataframe(
+    p_whiffs[["player_name", "pitch_name", "count", "runners_on", "miss_dist_in", "ei"]]
+    .sort_values("ei", ascending=False)
+    .head(10)
+    .rename(
+        columns={
+            "player_name": "Pitcher",
+            "pitch_name": "Pitch Type",
+            "count": "Count",
+            "runners_on": "Runners On",
+            "miss_dist_in": "Miss Dist (in)",
+            "ei": "EI",
+        }
+    ),
+    use_container_width=True,
+    hide_index=True,
+)
+
+batter_stand = (
+    pitch_data.groupby("batter")["stand"]
+    .agg(lambda s: s.mode().iloc[0] if not s.empty else "R")
+    .reset_index()
+    .rename(columns={"stand": "bats"})
+)
+
 # --- PITCH LAB ---
 st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
 st.markdown('<div class="whiff-section-label">Pitch Lab</div>', unsafe_allow_html=True)
 st.markdown("### Interactive Swing & Whiff Simulator")
-render_pitch_lab(df_base)
+render_pitch_lab(df_base, batter_stand)
 
 # --- LEADERBOARD ---
 st.markdown('<div class="whiff-section-label">League View</div>', unsafe_allow_html=True)
@@ -552,67 +643,4 @@ st.markdown("### Worst Whiffers")
 worst_df = pitch_data[pitch_data["zone_split"] == "Out of Zone"].sort_values("ei", ascending=False).head(25)
 st.dataframe(worst_df[["batter_name", "player_name", "pitch_name", "count", "runners_on", "miss_dist_in", "ei"]].rename(
     columns={"batter_name": "Batter", "player_name": "Pitcher", "pitch_name": "Pitch Type", "count": "Count", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
-), use_container_width=True, hide_index=True)
-
-# --- PLAYER BREAKDOWN & SELECTION OPTIMIZATION ---
-st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
-p_list = sorted(pitch_data["batter_name"].dropna().unique())
-
-# FIXED: Restructured on-page selector grid to compact wide, empty rows into clean, balanced data blocks
-col_control, col_headshot = st.columns([3, 1])
-
-with col_control:
-    selected_player_box = st.selectbox("Select Hitter for Performance Breakdown", p_list, index=p_list.index("Shohei Ohtani") if "Shohei Ohtani" in p_list else 0)
-    p_whiffs = pitch_data[pitch_data["batter_name"] == selected_player_box].copy()
-    p_whiffs["date_str"] = p_whiffs["game_date"].dt.strftime("%m-%d") # Format date metadata without year
-    
-    st.markdown(f"### Player Breakdown: {selected_player_box}")
-    
-    # Inline structural metrics inside control column block to balance visual asymmetry
-    sub_m1, sub_m2, sub_m3 = st.columns(3)
-    sub_m1.metric("Total Whiffs Detected", len(p_whiffs))
-    sub_m2.metric("Out-of-Zone Chases", len(p_whiffs[p_whiffs["zone_split"] == "Out of Zone"]))
-    sub_m3.metric("Player Peak EI", f"{p_whiffs['ei'].max():.0f}" if not p_whiffs.empty else "0")
-
-with col_headshot:
-    pid = int(p_whiffs["batter"].iloc[0]) if not p_whiffs.empty else None
-    if pid: 
-        st.image(f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{pid}/headshot/67/current", width=145)
-
-# FIXED: Individual Strike Zone visual positioned BEFORE player data-table grid rows
-if not p_whiffs.empty:
-    fig_sz = go.Figure()
-    fig_sz.add_trace(go.Scatter(
-        x=p_whiffs["plate_x"], y=p_whiffs["plate_z"], mode="markers", 
-        marker=dict(size=11, color=p_whiffs["ei"], colorscale="Viridis", showscale=True, colorbar=dict(title="EI")),
-        customdata=p_whiffs[["player_name", "pitch_name", "runners_on", "count", "miss_dist_in", "ei", "date_str"]],
-        hovertemplate=(
-            "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
-            "Date: %{customdata[6]}<br>" # No year format inside tooltips
-            "Count: %{customdata[3]}<br>"
-            "Runners On: %{customdata[2]}<br>"
-            "Miss Distance: %{customdata[4]:.0f} in<br>" # Clean formatted integers
-            "Embarrassment Index: %{customdata[5]:.0f}<br>" # Clean formatted integers
-            "<extra></extra>"
-        )
-    ))
-    avg_bot, avg_top = p_whiffs["sz_bot"].mean(), p_whiffs["sz_top"].mean()
-    fig_sz.add_shape(type="rect", x0=-0.708, x1=0.708, y0=avg_bot, y1=avg_top, line=dict(color="#f5efe3", width=3))
-    
-    # Custom compressed margins to eliminate large empty vertical spacing
-    fig_sz.update_layout(
-        template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", 
-        xaxis=dict(range=[-3, 3], title="Horizontal (ft)", scaleanchor="y", scaleratio=1), 
-        yaxis=dict(range=[0, 4.5], title="Vertical (ft)"), 
-        height=720,
-        margin=dict(t=5, b=5, l=0, r=0)
-    )
-    st.plotly_chart(fig_sz, use_container_width=True)
-
-# FIXED: Player View Table rendered cleanly beneath plot visual
-st.markdown('<div class="whiff-section-label">Player View</div>', unsafe_allow_html=True)
-st.markdown(f"### {selected_player_box}'s Top Whiffs")
-# Confirmed: Count is positioned directly before Runners On
-st.dataframe(p_whiffs[["player_name", "pitch_name", "count", "runners_on", "miss_dist_in", "ei"]].sort_values("ei", ascending=False).head(10).rename(
-    columns={"player_name": "Pitcher", "pitch_name": "Pitch Type", "count": "Count", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
 ), use_container_width=True, hide_index=True)

@@ -46,6 +46,56 @@ LOCATION_PRESETS = {
     "Paint the corner": (0.75, 1.35),
 }
 
+MLB_HEADSHOT_URL = (
+    "https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{id}/headshot/67/current"
+)
+
+
+def mlb_headshot_url(batter_id: int) -> str:
+    return MLB_HEADSHOT_URL.format(id=batter_id)
+
+
+def batter_handedness(batter_stand: pd.DataFrame | None, batter_id: int) -> str:
+    if batter_stand is not None and not batter_stand.empty:
+        match = batter_stand.loc[batter_stand["batter"] == batter_id, "bats"]
+        if not match.empty:
+            return str(match.iloc[0])
+    return "R"
+
+
+def plate_side_labels(bats: str) -> tuple[str, str]:
+    """Catcher's view: left = 3B (negative x), right = 1B (positive x)."""
+    if bats == "L":
+        return "Away", "Inside"
+    return "Inside", "Away"
+
+
+def horizontal_slider_label(bats: str) -> str:
+    left_label, right_label = plate_side_labels(bats)
+    return f"Horizontal (← {left_label} | {right_label} →)"
+
+
+def apply_zone_selection(zone_event, plate_x: float, plate_z: float) -> None:
+    if not zone_event or not getattr(zone_event, "selection", None):
+        return
+    points = zone_event.selection.points
+    if not points:
+        return
+
+    pt = points[-1]
+    for candidate in reversed(points):
+        if candidate.get("curve_number", 0) == 0:
+            pt = candidate
+            break
+
+    new_x = round(float(np.clip(float(pt["x"]), -2.0, 2.0)), 2)
+    new_z = round(float(np.clip(float(pt["y"]), 0.8, 4.2)), 2)
+    if (new_x, new_z) == (round(plate_x, 2), round(plate_z, 2)):
+        return
+    st.session_state.lab_px = new_x
+    st.session_state.lab_pz = new_z
+    st.rerun()
+
 
 @st.cache_resource
 def load_model_bundle(path: Path):
@@ -161,8 +211,10 @@ def build_location_figure(
     plate_z: float,
     sz_bot: float,
     sz_top: float,
+    bats: str = "R",
     clickable: bool = True,
 ) -> go.Figure:
+    left_label, right_label = plate_side_labels(bats)
     fig = go.Figure()
     fig.add_shape(
         type="rect",
@@ -174,37 +226,71 @@ def build_location_figure(
         fillcolor="rgba(245, 239, 227, 0.06)",
     )
     if clickable:
-        xs = np.linspace(-2.0, 2.0, 41)
-        zs = np.linspace(0.8, 4.2, 35)
+        xs = np.linspace(-2.0, 2.0, 51)
+        zs = np.linspace(0.8, 4.2, 43)
         grid_x, grid_z = np.meshgrid(xs, zs)
         fig.add_trace(
             go.Scatter(
                 x=grid_x.ravel(),
                 y=grid_z.ravel(),
                 mode="markers",
-                marker=dict(size=10, color="rgba(255,255,255,0.02)"),
+                marker=dict(size=22, color="rgba(255,255,255,0.01)"),
                 hoverinfo="skip",
                 name="Click to place",
             )
         )
-    fig.add_trace(
-        go.Scatter(
-            x=[plate_x],
-            y=[plate_z],
-            mode="markers",
-            marker=dict(size=18, color="#fde725", line=dict(color="#0f172a", width=2)),
-            name="Your pitch",
-        )
+    fig.add_shape(
+        type="circle",
+        xref="x",
+        yref="y",
+        x0=plate_x - 0.09,
+        x1=plate_x + 0.09,
+        y0=plate_z - 0.09,
+        y1=plate_z + 0.09,
+        fillcolor="#fde725",
+        line=dict(color="#0f172a", width=2),
+        layer="above",
+    )
+    label_y = sz_top + 0.22
+    fig.add_annotation(
+        x=-2.15,
+        y=label_y,
+        text=f"<b>L</b><br>3B<br><span style='font-size:11px'>{left_label}</span>",
+        showarrow=False,
+        font=dict(color="#f5efe3", size=12),
+        xanchor="center",
+    )
+    fig.add_annotation(
+        x=2.15,
+        y=label_y,
+        text=f"<b>R</b><br>1B<br><span style='font-size:11px'>{right_label}</span>",
+        showarrow=False,
+        font=dict(color="#f5efe3", size=12),
+        xanchor="center",
+    )
+    fig.add_annotation(
+        x=0,
+        y=0.62,
+        text=f"Bats: <b>{'Left' if bats == 'L' else 'Right'}</b> · Catcher's view",
+        showarrow=False,
+        font=dict(color="#cbbfa8", size=11),
     )
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(range=[-2.5, 2.5], title="Horizontal (ft)", scaleanchor="y", scaleratio=1),
+        xaxis=dict(
+            range=[-2.5, 2.5],
+            title="Horizontal (catcher's view: L = 3B side, R = 1B side)",
+            scaleanchor="y",
+            scaleratio=1,
+        ),
         yaxis=dict(range=[0.5, 4.5], title="Vertical (ft)"),
-        height=420,
-        margin=dict(t=20, b=20, l=20, r=20),
+        height=440,
+        margin=dict(t=30, b=20, l=20, r=20),
         showlegend=False,
+        dragmode="select",
+        clickmode="event+select",
     )
     return fig
 
@@ -223,7 +309,7 @@ def guess_label(prob: float, guess_yes: bool) -> str:
     return "✗ Model disagrees"
 
 
-def render_pitch_lab(qualified_df: pd.DataFrame) -> None:
+def render_pitch_lab(qualified_df: pd.DataFrame, batter_stand: pd.DataFrame | None = None) -> None:
     swing_bundle, whiff_bundle = load_pitch_lab_models()
 
     if swing_bundle is None or whiff_bundle is None:
@@ -261,10 +347,17 @@ def render_pitch_lab(qualified_df: pd.DataFrame) -> None:
     col_setup, col_zone = st.columns([1, 1])
 
     with col_setup:
-        hitter = st.selectbox("Pick your hitter", hitters, index=default_idx, key="lab_hitter")
+        hitter_row = st.columns([3, 1])
+        with hitter_row[0]:
+            hitter = st.selectbox("Pick your hitter", hitters, index=default_idx, key="lab_hitter")
         batter_id = int(
             qualified_df.loc[qualified_df["player_name"] == hitter, "batter"].iloc[0]
         )
+        bats = batter_handedness(batter_stand, batter_id)
+        with hitter_row[1]:
+            st.image(mlb_headshot_url(batter_id), width=110)
+            st.caption(f"Bats **{'L' if bats == 'L' else 'R'}**")
+
         sz_bot, sz_top = hitter_strike_zone(zones_df, profiles, batter_id)
 
         pitch_name = st.selectbox("Pick the pitch", list(PITCH_NAME_TO_TYPE.keys()), key="lab_pitch")
@@ -289,7 +382,7 @@ def render_pitch_lab(qualified_df: pd.DataFrame) -> None:
 
         st.caption("Fine-tune location (ft)")
         plate_x = st.slider(
-            "Horizontal (negative = inside to RHH)",
+            horizontal_slider_label(bats),
             -2.0,
             2.0,
             float(st.session_state.lab_px),
@@ -306,7 +399,7 @@ def render_pitch_lab(qualified_df: pd.DataFrame) -> None:
         )
 
     with col_zone:
-        zone_fig = build_location_figure(plate_x, plate_z, sz_bot, sz_top)
+        zone_fig = build_location_figure(plate_x, plate_z, sz_bot, sz_top, bats=bats)
         zone_event = st.plotly_chart(
             zone_fig,
             use_container_width=True,
@@ -314,15 +407,10 @@ def render_pitch_lab(qualified_df: pd.DataFrame) -> None:
             selection_mode="points",
             key="lab_zone_chart",
         )
-        if zone_event and zone_event.selection and zone_event.selection.points:
-            pt = zone_event.selection.points[0]
-            new_x = round(float(pt["x"]), 2)
-            new_z = round(float(pt["y"]), 2)
-            if abs(new_x - plate_x) > 0.04 or abs(new_z - plate_z) > 0.04:
-                st.session_state.lab_px = new_x
-                st.session_state.lab_pz = new_z
-                st.rerun()
-        st.caption(f"Click the zone or use presets. Sized to **{hitter}**'s average height.")
+        apply_zone_selection(zone_event, plate_x, plate_z)
+        st.caption(
+            f"Click the chart to place the pitch (yellow dot). Zone sized to **{hitter}**'s average height."
+        )
 
     miss_in = miss_distance_inches(plate_x, plate_z, sz_bot, sz_top)
     f1, f2, f3 = st.columns(3)
