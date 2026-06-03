@@ -43,6 +43,14 @@ The pull keeps **regular season only** (`game_type = R`, Mar 27 – Sep 28 2025)
 
 Training writes `data/model/model_report.html` (ROC, calibration, heatmaps, scenarios).
 
+**Exploratory analysis** (Section III of the report outline):
+
+```bash
+python notebooks/exploratory_analysis.py
+```
+
+Opens `data/reports/eda_report.html` — correlations, trends, spatial patterns, and a **league vs per-player model** comparison on the September holdout.
+
 ## Run the app
 
 ```bash

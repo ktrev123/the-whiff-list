@@ -34,6 +34,7 @@ from src.model_viz import export_training_report
 from src.whiff_features import (
     MODEL_INPUT_COLS,
     NUMERIC_FEATURE_COLS,
+    CATEGORICAL_FEATURE_COLS,
     PITCH_METRIC_COLS,
     SEASON_END,
     SEASON_START,
@@ -75,7 +76,7 @@ def build_preprocessor():
     return ColumnTransformer(
         [
             ("num", StandardScaler(), NUMERIC_FEATURE_COLS),
-            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), ["pitch_type"]),
+            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), CATEGORICAL_FEATURE_COLS),
         ]
     )
 
@@ -122,10 +123,13 @@ def feature_importance(model, model_name):
     else:
         values = np.abs(model.named_steps["clf"].coef_[0])
     ranked = sorted(zip(names, values), key=lambda x: x[1], reverse=True)
-    return {
-        friendly_feature_name(name): round(float(val), 4)
-        for name, val in ranked
-    }
+    out = {}
+    for name, val in ranked:
+        label = friendly_feature_name(name)
+        if "effective velocity" in label.lower() or "effective_speed" in name.lower():
+            continue
+        out[label] = round(float(val), 4)
+    return out
 
 
 def build_prediction_grid(train_df, pitch_type="FF"):

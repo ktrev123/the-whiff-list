@@ -11,8 +11,10 @@ FEATURE_LABELS = {
     "balls": "Balls in the count",
     "strikes": "Strikes in the count",
     "runners_on": "Runners on base",
+    "is_two_strike": "Two-strike count flag",
+    "count_state": "Count leverage state",
     "release_speed": "Release velocity (mph)",
-    "effective_speed": "Effective velocity (mph)",
+    "speed_diff": "Perceived velo minus release speed (mph)",
     "pfx_x": "Horizontal break",
     "pfx_z": "Vertical break",
     "release_spin_rate": "Spin rate (rpm)",
@@ -29,6 +31,9 @@ def friendly_feature_name(encoded_name: str) -> str:
     if encoded_name.startswith("cat__pitch_type_"):
         code = encoded_name.replace("cat__pitch_type_", "", 1)
         return f"Pitch type: {code}"
+    if encoded_name.startswith("cat__count_state_"):
+        state = encoded_name.replace("cat__count_state_", "", 1)
+        return f"Count: {state.replace('_', ' ')}"
     return encoded_name
 
 

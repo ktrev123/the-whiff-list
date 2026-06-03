@@ -17,6 +17,7 @@ from src.statcast_schema import (
     SEASON_START,
     STATCAST_KEEP_COLS,
     STRING_COLS,
+    filter_competitive_pitches,
     filter_regular_season,
     filter_season_dates,
     regular_season_month_ranges,
@@ -122,6 +123,7 @@ def build_season_file() -> pd.DataFrame:
         .pipe(select_columns)
         .drop_duplicates(subset=["game_pk", "at_bat_number", "pitch_number"])
         .pipe(filter_known_players)
+        .pipe(filter_competitive_pitches)
         .sort_values(["game_date", "game_pk", "at_bat_number", "pitch_number"])
         .reset_index(drop=True)
     )

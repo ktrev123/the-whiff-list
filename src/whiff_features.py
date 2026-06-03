@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from src.statcast_schema import SEASON_END, SEASON_START
+from src.statcast_schema import SEASON_END, SEASON_START, filter_competitive_pitches
 
 WHIFF_DESCRIPTIONS = {"swinging_strike", "swinging_strike_blocked", "missed_bunt"}
 
@@ -21,7 +21,7 @@ SWING_DESCRIPTIONS = {
 
 PITCH_METRIC_COLS = [
     "release_speed",
-    "effective_speed",
+    "speed_diff",
     "pfx_x",
     "pfx_z",
     "release_spin_rate",
@@ -29,14 +29,34 @@ PITCH_METRIC_COLS = [
     "release_extension",
 ]
 
-CATEGORICAL_FEATURE_COLS = ["pitch_type"]
+def count_leverage_label(balls: int, strikes: int) -> str:
+    if strikes == 2:
+        return "two_strike"
+    if balls > strikes:
+        return "hitter_ahead"
+    if strikes > balls:
+        return "pitcher_ahead"
+    return "even"
+
+
+def count_state_label(balls: int, strikes: int) -> str:
+    """Categorical count leverage for tree models: Hitter Ahead, Pitcher Ahead, Even, Full (3-2)."""
+    if balls == 3 and strikes == 2:
+        return "Full"
+    if balls > strikes:
+        return "Hitter Ahead"
+    if strikes > balls:
+        return "Pitcher Ahead"
+    return "Even"
+
+
+CATEGORICAL_FEATURE_COLS = ["pitch_type", "count_state"]
 
 NUMERIC_FEATURE_COLS = [
     "plate_x",
     "plate_z",
     "miss_dist_in",
-    "balls",
-    "strikes",
+    "is_two_strike",
     "runners_on",
     *PITCH_METRIC_COLS,
 ]
@@ -64,6 +84,18 @@ def engineer_features(df):
     out["runners_on"] = out[["on_1b", "on_2b", "on_3b"]].notna().sum(axis=1).astype("int8")
     out["balls"] = out["balls"].fillna(0).astype("int8")
     out["strikes"] = out["strikes"].fillna(0).astype("int8")
+    out["count_leverage"] = out.apply(
+        lambda r: count_leverage_label(int(r["balls"]), int(r["strikes"])), axis=1
+    )
+    out["count_state"] = out.apply(
+        lambda r: count_state_label(int(r["balls"]), int(r["strikes"])), axis=1
+    )
+    out["is_two_strike"] = (out["strikes"] == 2).astype("int8")
+    if "effective_speed" in out.columns and "release_speed" in out.columns:
+        out["speed_diff"] = (
+            pd.to_numeric(out["effective_speed"], errors="coerce")
+            - pd.to_numeric(out["release_speed"], errors="coerce")
+        ).astype("float32")
     out["is_whiff"] = out["description"].isin(WHIFF_DESCRIPTIONS).astype("int8")
     out["is_swing"] = out["description"].isin(SWING_DESCRIPTIONS).astype("int8")
     if "pitch_type" in out.columns:
@@ -97,6 +129,7 @@ def apply_pitch_imputation(df: pd.DataFrame, medians: pd.Series) -> pd.DataFrame
 
 def filter_modeling_frame(df, qualified_batters):
     frame = engineer_features(df)
+    frame = filter_competitive_pitches(frame)
     frame = frame[frame["batter"].isin(qualified_batters)]
     frame = frame.dropna(subset=["batter", "plate_x", "plate_z", "sz_top", "sz_bot"])
     return frame

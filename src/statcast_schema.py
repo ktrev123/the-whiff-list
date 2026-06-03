@@ -9,6 +9,33 @@ SEASON_START = "2025-03-27"
 SEASON_END = "2025-09-28"
 REGULAR_SEASON_GAME_TYPE = "R"
 
+# Competitive pitch types only — exclude position-player / junk / misreads
+EXCLUDED_PITCH_TYPES = frozenset({"PO", "FO", "UN", "KN", "CS", "FA", "EP"})
+
+PITCH_TYPE_GROUPS: dict[str, list[str]] = {
+    "Fastballs": ["FF", "SI", "FC"],
+    "Breaking Balls": ["SL", "KC", "ST", "SV", "CU"],
+    "Off-Speed": ["CH", "FS"],
+}
+
+ALLOWED_PITCH_TYPES = frozenset(code for codes in PITCH_TYPE_GROUPS.values() for code in codes)
+
+
+def pitch_type_group(pitch_type: str) -> str | None:
+    for group, codes in PITCH_TYPE_GROUPS.items():
+        if pitch_type in codes:
+            return group
+    return None
+
+
+def filter_competitive_pitches(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop excluded pitch types and keep competitive MLB pitch codes."""
+    out = df.copy()
+    if "pitch_type" not in out.columns:
+        return out
+    out["pitch_type"] = out["pitch_type"].astype(str)
+    return out[out["pitch_type"].isin(ALLOWED_PITCH_TYPES)].copy()
+
 # Columns persisted to statcast_2025.parquet
 # Model inputs + derived inputs + targets + minimal app/leaderboard fields
 STATCAST_KEEP_COLS = [

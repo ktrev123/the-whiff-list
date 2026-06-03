@@ -229,6 +229,9 @@ data/model/charts/
 data/model/model_report.html
 data/model/pitch_predictions_test.parquet
 
+# Generated reports
+data/reports/
+
 # Statcast pull cache metadata
 data/raw_parquet/*.meta
 # data/whiff_leaderboard_2025.csv
