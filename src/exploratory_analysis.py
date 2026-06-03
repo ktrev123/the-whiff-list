@@ -129,7 +129,7 @@ def load_batter_names() -> pd.DataFrame:
 
 
 def boundary_signed_inches(plate_x: float, plate_z: float, sz_top: float, sz_bot: float) -> float:
-    """Signed distance in inches from the strike-zone boundary (negative = inside)."""
+    """Inches to nearest zone boundary; positive = inside, negative = outside."""
     half_w_ft = 17.0 / 24.0
     inside_x = half_w_ft - abs(plate_x)
     inside_z_top = sz_top - plate_z
@@ -145,11 +145,11 @@ def assign_attack_zone(row) -> str:
     sz_top = float(row.get("sz_top", 3.5))
     sz_bot = float(row.get("sz_bot", 1.5))
     signed_in = boundary_signed_inches(float(px), float(pz), sz_top, sz_bot)
-    if signed_in <= -2.0:
+    if signed_in > 2.0:
         return "Heart"
-    if signed_in <= 2.0:
+    if signed_in >= -2.0:
         return "Shadow"
-    if signed_in <= 4.0:
+    if signed_in >= -4.0:
         return "Chase"
     return "Waste"
 
