@@ -238,3 +238,5 @@ data/raw_parquet/*.meta
 # data/model/model_insights.json
 # data/model/model_metrics.json
 # data/model/batter_predictions.csv
+!data/model/pitch_lab_hitter_rates.csv
+!data/model/pitch_lab_league_rates.json

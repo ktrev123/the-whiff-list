@@ -15,6 +15,7 @@ from src.model_viz import (
     build_pred_grid_figure,
     build_roc_figure,
 )
+from src.pitch_simulator import render_whiff_lab
 from src.whiff_features import SEASON_END, SEASON_START
 
 ROOT = Path(__file__).resolve().parent
@@ -63,6 +64,91 @@ div[data-testid="stMetric"] {
     border-radius: 14px;
     padding: 20px;
     margin-bottom: 20px;
+}
+.whiff-hitter-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--whiff-border);
+    border-radius: 16px;
+    background: linear-gradient(180deg, var(--whiff-navy-2) 0%, var(--whiff-navy) 100%);
+}
+.whiff-hitter-photo {
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--whiff-gold);
+}
+.whiff-hitter-name {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--whiff-cream);
+    line-height: 1.2;
+}
+.whiff-hitter-bats {
+    color: var(--whiff-cream-muted);
+    font-size: 0.92rem;
+    margin-top: 4px;
+}
+.whiff-zone-panel {
+    text-align: center;
+    padding: 10px 12px;
+    border: 1px solid var(--whiff-border);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.02);
+}
+.whiff-zone-label {
+    color: var(--whiff-cream-muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+}
+.whiff-zone-name {
+    font-size: 1.75rem;
+    font-weight: 800;
+    margin: 2px 0 6px;
+}
+.whiff-zone-desc {
+    color: var(--whiff-cream-muted);
+    font-size: 0.9rem;
+    line-height: 1.35;
+}
+.whiff-zone-coords {
+    color: var(--whiff-gold);
+    font-size: 0.85rem;
+    margin-top: 8px;
+}
+.whiff-hitter-switch {
+    color: var(--whiff-gold);
+    font-size: 0.82rem;
+    margin-top: 6px;
+    line-height: 1.35;
+}
+.whiff-hitter-stat {
+    color: var(--whiff-cream-muted);
+    font-size: 0.82rem;
+    margin: 8px 0 0;
+    line-height: 1.35;
+}
+.whiff-hitter-stat-league {
+    color: var(--whiff-cream-muted);
+    font-size: 0.74rem;
+    margin: 0 0 6px;
+    opacity: 0.85;
+}
+.whiff-hitter-stat-muted {
+    color: var(--whiff-cream-muted);
+    font-size: 0.82rem;
+    margin-top: 8px;
+}
+.whiff-guess-muted {
+    color: var(--whiff-cream-muted);
+    font-size: 0.95rem;
+    opacity: 0.45;
+    margin: 0.25rem 0 0.5rem;
 }
 </style>
 """,
@@ -135,20 +221,7 @@ def render_model_panel(block, rate_label: str):
 def tab_whiff_lab():
     st.markdown('<div class="whiff-section-label">Interactive Simulator</div>', unsafe_allow_html=True)
     st.header("The Whiff Lab")
-    st.markdown(
-        """
-        Placeholder for the interactive **Pitch Lab** — pick a hitter, pitch type, count, and location;
-        guess swing vs. take and whiff vs. contact; then reveal model probabilities.
-
-        **Planned features**
-        - Strike-zone grid with click-to-place pitch location
-        - League vs. hitter-specific swing / whiff probabilities
-        - Hitter headshot and handedness-aware zone labels
-
-        No simulator logic is wired up in this skeleton yet.
-        """
-    )
-    st.info("Deploy bundle targets: `data/model/pitch_lab_swing.joblib`, `pitch_lab_whiff.joblib`, and profile JSON.")
+    render_whiff_lab()
 
 
 def tab_real_world_use():

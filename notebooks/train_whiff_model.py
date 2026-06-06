@@ -61,6 +61,8 @@ PITCH_LAB_SWING_FILE = MODEL_DIR / "pitch_lab_swing.joblib"
 PITCH_LAB_WHIFF_FILE = MODEL_DIR / "pitch_lab_whiff.joblib"
 PITCH_LAB_PROFILES_FILE = MODEL_DIR / "pitch_lab_profiles.json"
 PITCH_LAB_ZONES_FILE = MODEL_DIR / "pitch_lab_hitter_zones.csv"
+PITCH_LAB_RATES_FILE = MODEL_DIR / "pitch_lab_hitter_rates.csv"
+PITCH_LAB_LEAGUE_RATES_FILE = MODEL_DIR / "pitch_lab_league_rates.json"
 
 MIN_ABS = 502
 TRAIN_END = "April–August 2025"
@@ -257,6 +259,14 @@ def export_pitch_lab_artifacts(train_df, train_swings, pitch_medians, qualified)
     zones["sz_bot"] = zones["sz_bot"].round(4)
     zones["sz_top"] = zones["sz_top"].round(4)
     zones.to_csv(PITCH_LAB_ZONES_FILE, index=False)
+
+    from src.hitter_rates import export_hitter_rates_from_frame
+
+    export_hitter_rates_from_frame(
+        train_df[train_df["batter"].isin(qualified)],
+        PITCH_LAB_RATES_FILE,
+        PITCH_LAB_LEAGUE_RATES_FILE,
+    )
 
 
 def train_best_model(x_train, y_train, x_test, y_test):
