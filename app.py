@@ -1,9 +1,11 @@
+"""The Whiff List — Streamlit app skeleton."""
+
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
 from src.model_viz import (
@@ -13,19 +15,27 @@ from src.model_viz import (
     build_pred_grid_figure,
     build_roc_figure,
 )
-from src.pitch_simulator import render_pitch_lab
 from src.whiff_features import SEASON_END, SEASON_START
+
+ROOT = Path(__file__).resolve().parent
+MODEL_DIR = ROOT / "data" / "model"
+INSIGHTS_FILE = MODEL_DIR / "model_insights.json"
+BATTER_PRED_FILE = MODEL_DIR / "batter_predictions.csv"
+GRID_PRED_FILE = MODEL_DIR / "league_whiff_grid.parquet"
+SWING_GRID_FILE = MODEL_DIR / "league_swing_grid.parquet"
+EDA_REPORT_FILE = ROOT / "data" / "reports" / "eda_report.html"
 
 # --- PAGE CONFIG ---
 st.set_page_config(
     page_title="The Whiff List",
     page_icon="💨",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
 
 # --- STYLING ---
-st.markdown("""
+st.markdown(
+    """
 <style>
 :root {
     --whiff-navy: #0f172a;
@@ -42,163 +52,30 @@ div[data-testid="stMetric"] {
     border: 1px solid var(--whiff-border); border-radius: 16px;
     padding: 10px 14px;
 }
-div[data-testid="stDataFrame"] { border: 1px solid var(--whiff-border); border-radius: 14px; overflow: hidden; }
-.whiff-section-label { color: var(--whiff-gold); font-size: 0.86rem; font-weight: 700; text-transform: uppercase; margin-bottom: 0.25rem; }
-.whiff-divider { height: 1px; width: 100%; background: linear-gradient(90deg, rgba(212,169,55,0) 0%, rgba(212,169,55,0.55) 50%, rgba(212,169,55,0) 100%); margin: 2rem 0 1.5rem 0; }
+.whiff-subtle { color: var(--whiff-cream-muted); font-size: 0.95rem; margin-bottom: 1.25rem; }
+.whiff-section-label {
+    color: var(--whiff-gold); font-size: 0.86rem; font-weight: 700;
+    text-transform: uppercase; margin-bottom: 0.25rem;
+}
 .methodology-box {
     background-color: rgba(255, 255, 255, 0.02);
     border: 1px solid var(--whiff-border);
     border-radius: 14px;
     padding: 20px;
-    margin-bottom: 25px;
+    margin-bottom: 20px;
 }
-.leaderboard-sub { color: var(--whiff-cream-muted); font-size: 0.88rem; margin-top: -0.5rem; margin-bottom: 1rem; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# --- DATA HELPERS ---
-@st.cache_data
-def load_leaderboard_data():
-    df = pd.read_csv("data/whiff_leaderboard_2025.csv")
-    df["player_name"] = df["player_name"].str.title()
-    return df
 
 @st.cache_data
-def load_pitch_data():
-    return pd.read_parquet("data/statcast_2025.parquet")
-
-def last_first_to_first_last(name):
-    if isinstance(name, str) and "," in name:
-        parts = [part.strip() for part in name.split(",", 1)]
-        return f"{parts[1]} {parts[0]}"
-    return name
-
-def calculate_miss_distance(row):
-    x, z = row["plate_x"], row["plate_z"]
-    left, right = -0.708, 0.708
-    bot, top = row["sz_bot"], row["sz_top"]
-    x_out = max(0, left - x) if x < left else max(0, x - right)
-    z_out = max(0, bot - z) if z < bot else max(0, z - top)
-    return np.sqrt((x_out ** 2) + (z_out ** 2))
-
-EI_THERMO_MIN = 20
-EI_THERMO_MAX = 60
-MAIN_PITCHES = ["4-Seam Fastball", "Slider", "Changeup", "Curveball", "Sinker", "Cutter", "Sweeper"]
-
-
-def ei_marker_color(ei):
-    if ei >= 47:
-        return "#e63946"
-    if ei <= 35:
-        return "#22c55e"
-    return "#f5efe3"
-
-
-def ei_marker_line(ei):
-    if 35 < ei < 47:
-        return "#9ca3af"
-    return "#0f172a"
-
-
-def build_ei_thermometer(pitch_ei_df, handedness, title):
-    hand_df = pitch_ei_df[pitch_ei_df["Handedness"] == handedness]
-    ei_by_pitch = hand_df.set_index("pitch_name")["ei"].to_dict()
-
-    fig = go.Figure()
-    y_positions = list(range(len(MAIN_PITCHES)))
-
-    for x0, x1, color in [
-        (EI_THERMO_MIN, 35, "rgba(34, 197, 94, 0.18)"),
-        (35, 47, "rgba(245, 239, 227, 0.10)"),
-        (47, EI_THERMO_MAX, "rgba(230, 57, 70, 0.18)"),
-    ]:
-        fig.add_shape(
-            type="rect",
-            x0=x0,
-            x1=x1,
-            y0=-0.55,
-            y1=len(MAIN_PITCHES) - 0.45,
-            fillcolor=color,
-            line_width=0,
-            layer="below",
-        )
-
-    for i in y_positions:
-        fig.add_shape(
-            type="rect",
-            x0=EI_THERMO_MIN,
-            x1=EI_THERMO_MAX,
-            y0=i - 0.18,
-            y1=i + 0.18,
-            fillcolor="rgba(255, 255, 255, 0.03)",
-            line=dict(color="rgba(245, 239, 227, 0.22)", width=1.5),
-            layer="below",
-        )
-        for tick in range(EI_THERMO_MIN, EI_THERMO_MAX + 1, 10):
-            fig.add_shape(
-                type="line",
-                x0=tick,
-                x1=tick,
-                y0=i - 0.08,
-                y1=i + 0.08,
-                line=dict(color="rgba(245, 239, 227, 0.12)", width=1),
-                layer="below",
-            )
-
-    marker_x, marker_y, marker_colors, marker_lines, hover_labels = [], [], [], [], []
-    for i, pitch in enumerate(MAIN_PITCHES):
-        ei = ei_by_pitch.get(pitch)
-        if pd.isna(ei):
-            continue
-        ei = float(np.clip(ei, EI_THERMO_MIN, EI_THERMO_MAX))
-        marker_x.append(ei)
-        marker_y.append(i)
-        marker_colors.append(ei_marker_color(ei))
-        marker_lines.append(ei_marker_line(ei))
-        hover_labels.append(pitch)
-
-    fig.add_trace(
-        go.Scatter(
-            x=marker_x,
-            y=marker_y,
-            mode="markers",
-            marker=dict(size=24, color=marker_colors, line=dict(color=marker_lines, width=2), symbol="circle"),
-            customdata=np.array(hover_labels).reshape(-1, 1),
-            hovertemplate="<b>%{customdata[0]}</b><br>Avg EI: %{x:.1f}<extra></extra>",
-            showlegend=False,
-        )
-    )
-
-    fig.update_layout(
-        title=dict(text=title, font=dict(size=15, color="#f5efe3")),
-        template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        height=400,
-        margin=dict(l=10, r=20, t=45, b=20),
-        xaxis=dict(
-            range=[EI_THERMO_MIN - 1, EI_THERMO_MAX + 1],
-            title="Embarrassment Index",
-            dtick=10,
-            gridcolor="rgba(245, 239, 227, 0.06)",
-            zeroline=False,
-        ),
-        yaxis=dict(
-            tickmode="array",
-            tickvals=y_positions,
-            ticktext=MAIN_PITCHES,
-            autorange="reversed",
-            showgrid=False,
-        ),
-    )
-    return fig
-
-
-MODEL_DIR = Path("data/model")
-INSIGHTS_FILE = MODEL_DIR / "model_insights.json"
-BATTER_PRED_FILE = MODEL_DIR / "batter_predictions.csv"
-GRID_PRED_FILE = MODEL_DIR / "league_whiff_grid.parquet"
-SWING_GRID_FILE = MODEL_DIR / "league_swing_grid.parquet"
+def load_batter_name_lookup():
+    lb_path = ROOT / "data" / "whiff_leaderboard_2025.csv"
+    if not lb_path.exists():
+        return pd.DataFrame(columns=["batter", "player_name"])
+    return pd.read_csv(lb_path)[["batter", "player_name"]].drop_duplicates()
 
 
 @st.cache_data
@@ -226,13 +103,11 @@ def load_pred_grid():
 def load_swing_grid():
     if SWING_GRID_FILE.exists():
         return pd.read_parquet(SWING_GRID_FILE)
-    if GRID_PRED_FILE.exists():
-        return pd.read_parquet(GRID_PRED_FILE)
     return None
 
 
-def render_model_panel(block, rate_label):
-    """One model's metrics, plain-English copy, and diagnostic charts."""
+def render_model_panel(block, rate_label: str):
+    """Read-only diagnostics for a pre-trained model block."""
     st.markdown(block["layman"]["what_it_outputs"])
     if block.get("training_note"):
         st.caption(block["training_note"])
@@ -257,170 +132,143 @@ def render_model_panel(block, rate_label):
     st.plotly_chart(build_importance_figure(block), use_container_width=True)
 
 
-# --- DATA PROCESSING ---
-df_base = load_leaderboard_data().copy()
-pitch_data = load_pitch_data().copy()
-pitch_data["game_date"] = pd.to_datetime(pitch_data["game_date"])
+def tab_whiff_lab():
+    st.markdown('<div class="whiff-section-label">Interactive Simulator</div>', unsafe_allow_html=True)
+    st.header("The Whiff Lab")
+    st.markdown(
+        """
+        Placeholder for the interactive **Pitch Lab** — pick a hitter, pitch type, count, and location;
+        guess swing vs. take and whiff vs. contact; then reveal model probabilities.
 
-# Global Qualification Filter (502 ABs)
-df_base = df_base[df_base["ab"] >= 502].copy()
+        **Planned features**
+        - Strike-zone grid with click-to-place pitch location
+        - League vs. hitter-specific swing / whiff probabilities
+        - Hitter headshot and handedness-aware zone labels
 
-# Hard Date Cutoff
-pitch_data = pitch_data[(pitch_data["game_date"] >= SEASON_START) & (pitch_data["game_date"] <= SEASON_END)].copy()
-
-whiff_desc = {"swinging_strike", "swinging_strike_blocked", "missed_bunt"}
-pitch_data = pitch_data[pitch_data["description"].isin(whiff_desc)].copy()
-pitch_data = pitch_data.dropna(subset=["batter", "plate_x", "plate_z", "sz_top", "sz_bot"])
-
-name_lookup = df_base[["batter", "player_name"]].drop_duplicates().rename(columns={"player_name": "batter_name"})
-pitch_data = pitch_data.merge(name_lookup, on="batter", how="inner")
-
-pitch_data["batter_name"] = pitch_data["batter_name"].str.title()
-pitch_data["player_name"] = pitch_data["player_name"].str.title().apply(last_first_to_first_last)
-pitch_data["miss_dist_in"] = (pitch_data.apply(calculate_miss_distance, axis=1) * 12).round(1)
-pitch_data["zone_split"] = np.where(pitch_data["miss_dist_in"] == 0, "In Zone", "Out of Zone")
-pitch_data["runners_on"] = pitch_data[["on_1b", "on_2b", "on_3b"]].notna().sum(axis=1)
-pitch_data["count"] = pitch_data["balls"].fillna(0).astype(int).astype(str) + "-" + pitch_data["strikes"].fillna(0).astype(int).astype(str)
-
-# Formula scaled up out of 100
-pitch_data["ei"] = ((100 / 0.85) * (0.45 * np.minimum(pitch_data["miss_dist_in"]/18, 1.0) + 
-                                    0.20 * (pitch_data["zone_split"] == "Out of Zone").astype(float) + 
-                                    0.20 * (pitch_data["runners_on"]/3.0))).round(1)
-
-# --- HEADER ---
-st.title("The Whiff List 💨")
-st.markdown('<div class="whiff-subtle">Tracking the ugliest chase whiffs and repeat flails from the 2025 MLB season.</div>', unsafe_allow_html=True)
-
-# --- METHODOLOGY SECTION ---
-st.markdown('<div class="whiff-section-label">Valuation Framework</div>', unsafe_allow_html=True)
-st.markdown("### Metrics Architecture: The Embarrassment Index")
-
-with st.container():
-    st.markdown("""
-    <div class="methodology-box">
-        <h4>Why evaluate Whiff Quality?</h4>
-        <p>Standard box-score metrics treat every swing-and-miss identically. But let's be real: protecting the plate on a borderline sinking 
-        fastball is just a professional hazard. Swinging and missing on a pitch 17 inches out of the zone when the count is 3-2 with 
-        your teammates desperately needing you on base? That's... <b>embarrassing</b>.</p>
-        <p>The <b>Embarrassment Index (EI)</b> is a context-aware tracking metric designed to isolate non-competitive, high-leverage plate 
-        discipline failures from structural swing-and-miss tendencies.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col_m1, col_m2 = st.columns(2)
-    with col_m1:
-        st.latex(r"EI = \frac{100}{0.85} \cdot \left(0.45 \cdot D + 0.20 \cdot Z + 0.20 \cdot R\right)")
-    with col_m2:
-        st.markdown("""
-        * **$D$ (Distance Penalty):** Linear scaling of the raw miss distance from the strike zone boundary, capped at 18 inches.
-        * **$Z$ (Zone Split):** A binary penalty applied instantly if the pitch is tracked completely outside the strike zone.
-        * **$R$ (Leverage Factor):** Scales the severity of the whiff based on base-runner occupancy (punishing high-leverage flails).
-        """)
-
-st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
-
-# --- LEAGUE HEATMAP ---
-st.markdown('<div class="whiff-section-label">League Profile</div>', unsafe_allow_html=True)
-st.markdown("### Full-Season Whiff Density Heatmap")
-
-fig_heat = go.Figure()
-fig_heat.add_trace(go.Histogram2dContour(
-    x=pitch_data["plate_x"],
-    y=pitch_data["plate_z"],
-    colorscale=[
-        [0.0, 'rgba(15, 23, 42, 0)'],
-        [0.05, 'rgba(72, 40, 120, 0.2)'],
-        [0.2, 'rgba(60, 80, 140, 0.6)'],
-        [0.4, '#20908d'],
-        [0.7, '#5ec962'],
-        [1.0, '#fde725']
-    ],
-    reversescale=False,
-    ncontours=45,
-    line=dict(width=0),
-    showscale=True,
-    colorbar=dict(title="Whiff Density"),
-    hoverinfo="skip" # REMOVED TOOLTIP COMPLETELY
-))
-fig_heat.add_shape(type="rect", x0=-0.708, x1=0.708, y0=1.6, y1=3.4, line=dict(color="#f5efe3", width=3))
-fig_heat.update_layout(
-    template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-    xaxis=dict(range=[-3, 3], title="Horizontal Plate Location (ft)", scaleanchor="y", scaleratio=1), # Exact axis boundaries
-    yaxis=dict(range=[0, 4.5], title="Vertical Plate Location (ft)"), # Exact axis boundaries
-    height=600
-)
-st.plotly_chart(fig_heat, use_container_width=True)
-
-# --- TRENDS ---
-st.markdown('<div class="whiff-section-label">Seasonal Trends</div>', unsafe_allow_html=True)
-trend = pitch_data[pitch_data["zone_split"] == "Out of Zone"].groupby("game_date").agg(vol=("description", "count"), ei=("ei", "mean")).reset_index()
-trend["vol_roll"] = trend["vol"].rolling(7).mean()
-trend["ei_roll"] = trend["ei"].rolling(7).mean()
-
-fig_t = go.Figure()
-fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["vol_roll"], name="7-Day Vol", line=dict(color="#20908d")))
-fig_t.add_trace(go.Scatter(x=trend["game_date"], y=trend["ei_roll"], name="7-Day Avg EI", line=dict(color="#fde725"), yaxis="y2"))
-fig_t.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis=dict(title="Volume"), yaxis2=dict(title="Avg EI", overlaying="y", side="right"), height=300)
-st.plotly_chart(fig_t, use_container_width=True)
-
-# --- PLATOON SPLITS THERMOMETER ---
-st.markdown('<div class="whiff-section-label">Platoon Splits</div>', unsafe_allow_html=True)
-st.markdown("### Chase Thermometer by Pitch Type")
-st.caption(
-    "Out-of-zone whiff severity on a 20–60 EI scale. Each row is a pitch-type thermometer; "
-    "the baseball marks where that handedness lands. Green = tamer chase, white = moderate, red = ugly flail."
-)
-
-splits_df = pitch_data[pitch_data["zone_split"] == "Out of Zone"].copy()
-splits_df["Handedness"] = splits_df["stand"].map({"L": "Left", "R": "Right"})
-pitch_splits = (
-    splits_df[splits_df["pitch_name"].isin(MAIN_PITCHES)]
-    .groupby(["pitch_name", "Handedness"], as_index=False)["ei"]
-    .mean()
-)
-
-therm_left, therm_right = st.columns(2)
-with therm_left:
-    st.plotly_chart(
-        build_ei_thermometer(pitch_splits, "Left", "Left-Handed Hitters"),
-        use_container_width=True,
+        No simulator logic is wired up in this skeleton yet.
+        """
     )
-with therm_right:
-    st.plotly_chart(
-        build_ei_thermometer(pitch_splits, "Right", "Right-Handed Hitters"),
-        use_container_width=True,
-    )
+    st.info("Deploy bundle targets: `data/model/pitch_lab_swing.joblib`, `pitch_lab_whiff.joblib`, and profile JSON.")
 
-# --- PREDICTIVE MODEL (PLAIN ENGLISH) ---
-st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
-st.markdown('<div class="whiff-section-label">Predictive Model</div>', unsafe_allow_html=True)
-st.markdown("### Swing & Whiff Models — Plain English")
-st.caption(
-    "Scroll to this section after training. Visuals appear below in tabs: "
-    "**Model A (Swing)**, **Model B (Whiff)**, and **Combined scenarios**."
-)
 
-insights = load_model_insights()
-batter_preds = load_batter_predictions()
-pred_grid = load_pred_grid()
-swing_grid = load_swing_grid()
+def tab_real_world_use():
+    st.markdown('<div class="whiff-section-label">Application</div>', unsafe_allow_html=True)
+    st.header("Real World Use")
+    st.markdown(
+        """
+        Placeholder for production-facing views that answer *"so what?"* for fans, analysts, and front-office users.
 
-if insights is None:
-    st.warning(
-        "No model insights found. From the project folder run:\n\n"
-        "`python notebooks/train_whiff_model.py`\n\n"
-        "Then refresh this page (R in Streamlit)."
+        **Planned features**
+        - **Embarrassment Index (EI)** leaderboard — context-aware chase-whiff severity
+        - **League whiff heatmaps** and seasonal chase trends
+        - **Player breakdown** — individual whiff maps and top flails
+        - **Scouting angles** — platoon splits, pitch-type chase profiles
+
+        This tab will consume the same Statcast pipeline and models documented in EDA and Model Refinement,
+        but presentation-first rather than methodology-first.
+        """
     )
-elif "swing" not in insights:
-    st.warning(
-        "Your saved insights are from the old single-model run. Re-run "
-        "`python notebooks/train_whiff_model.py` to train **both** swing and whiff models."
-    )
-else:
+    st.info("Heavy data pulls and chart rendering for this tab are intentionally deferred in the skeleton build.")
+
+
+def tab_exploratory_data_analysis():
+    st.markdown('<div class="whiff-section-label">Methodology</div>', unsafe_allow_html=True)
+    st.header("Exploratory Data Analysis")
+
     st.markdown(
         f"""
         <div class="methodology-box">
-            <h4>Two-step question</h4>
+        <h4>What this covers</h4>
+        <p>2025 MLB Statcast pitch-level data ({SEASON_START} – {SEASON_END}), qualified hitters (502+ AB),
+        competitive pitch types only. Train split: <b>Mar–Aug</b>; September holdout for model evaluation.</p>
+        <p>The EDA justifies a <b>hybrid modeling strategy</b>: league-wide swing/whiff models as the default,
+        with hitter-specific personalization when sample size and residuals support it (~600-pitch crossover).</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.subheader("Report sections")
+    sections = [
+        ("Data Quality", "Velocity (lower-fence only) and spin (two-sided IQR) outlier removal per pitch type."),
+        ("Count & Pitch Type", "All 12 counts; swing/whiff by Fastballs / Breaking Balls / Off-Speed."),
+        ("Hitter Heterogeneity", "Distribution of swing, whiff-if-swing, and chase rates across qualified hitters."),
+        ("Pitch Physics", "Velocity, spin, and movement summaries by pitch category."),
+        ("Plate Location", "Swing and whiff-if-swing heatmaps by horizontal / vertical location."),
+        ("Correlations", "Contextual variables → swing; pitch physics → whiff (no redundant speed_diff in matrix)."),
+        ("Attack Zones", "FanGraphs Heart / Shadow / Chase / Waste; personalization gains by zone."),
+        ("League vs Personalized", "Learning curve, residuals, and hitter-specific swing model comparison."),
+        ("Feature Importance & Conclusions", "Random-forest drivers and production recommendations."),
+    ]
+    for title, desc in sections:
+        st.markdown(f"**{title}** — {desc}")
+
+    st.subheader("Interactive report")
+    if EDA_REPORT_FILE.exists():
+        st.success(f"Found local report: `{EDA_REPORT_FILE.relative_to(ROOT)}`")
+        st.markdown(
+            f"[Open full HTML report]({EDA_REPORT_FILE.resolve().as_uri()}) "
+            "(best in a new browser tab — Plotly charts are interactive)."
+        )
+        with st.expander("Preview report (embedded)"):
+            report_html = EDA_REPORT_FILE.read_text(encoding="utf-8")
+            st.components.v1.html(report_html, height=720, scrolling=True)
+    else:
+        st.warning("Report not generated yet. From the project folder run:")
+        st.code("python notebooks/exploratory_analysis.py", language="bash")
+        st.caption("Output path: `data/reports/eda_report.html` (gitignored locally).")
+
+    st.subheader("Key findings (summary)")
+    st.markdown(
+        """
+        - **Attack zones:** Heart ~72% swing; Waste ~21% swing (after fixing zone sign logic).
+        - **Personalization:** Hitter models beat league for most qualified hitters past ~600 training pitches.
+        - **Zone gains:** Largest log-loss improvements in **Chase** and **Shadow**; Waste gains are positive but noisier.
+        - **Features:** Location and count drive swing; pitch physics matter more for whiff. Models use `count_state`
+          + `is_two_strike` and `speed_diff` (not collinear effective velocity).
+        """
+    )
+
+
+def tab_model_refinement():
+    st.markdown('<div class="whiff-section-label">Predictive Models</div>', unsafe_allow_html=True)
+    st.header("Model Refinement")
+    st.markdown(
+        """
+        Read-only view of **pre-trained** swing and whiff models. This tab loads saved artifacts only —
+        no training runs in the app.
+        """
+    )
+
+    insights = load_model_insights()
+    batter_preds = load_batter_predictions()
+    pred_grid = load_pred_grid()
+    swing_grid = load_swing_grid()
+    name_lookup = load_batter_name_lookup()
+
+    if insights is None:
+        st.warning(
+            "No model insights found. Train offline, then refresh:\n\n"
+            "`python notebooks/train_whiff_model.py`"
+        )
+        st.markdown(
+            """
+            **What training produces**
+            - `data/model/swing_model.joblib` / `whiff_model.joblib`
+            - `data/model/model_insights.json` — metrics, feature importance, example scenarios
+            - Prediction grids and September holdout batter summaries
+            """
+        )
+        return
+
+    if "swing" not in insights:
+        st.warning("Saved insights are outdated. Re-run `python notebooks/train_whiff_model.py`.")
+        return
+
+    st.markdown(
+        f"""
+        <div class="methodology-box">
+            <h4>Two-step pipeline</h4>
             <p>{insights['layman']['validation']}</p>
             <p>{insights['layman']['combined']}</p>
         </div>
@@ -428,12 +276,12 @@ else:
         unsafe_allow_html=True,
     )
 
-    tab_swing, tab_whiff, tab_combo = st.tabs(
-        ["Model A — Swing rate", "Model B — Whiff rate (if he swings)", "Combined scenarios"]
+    tab_swing, tab_whiff, tab_combo, tab_notes = st.tabs(
+        ["Model A — Swing", "Model B — Whiff", "Combined scenarios", "Refinement notes"]
     )
 
     with tab_swing:
-        st.markdown("#### (A) Will the hitter swing?")
+        st.markdown("#### Will the hitter swing?")
         render_model_panel(insights["swing"], "swing rate")
         if swing_grid is not None and "pred_swing_prob" in swing_grid.columns:
             st.plotly_chart(
@@ -446,11 +294,10 @@ else:
                 use_container_width=True,
             )
         if batter_preds is not None and "mean_pred_swing" in batter_preds.columns:
-            name_lookup_pred = df_base[["batter", "player_name"]].drop_duplicates()
             st.plotly_chart(
                 build_batter_pred_figure(
                     batter_preds,
-                    name_lookup_pred,
+                    name_lookup,
                     "actual_swing_rate",
                     "mean_pred_swing",
                     "Actual swing % (September)",
@@ -461,7 +308,7 @@ else:
             )
 
     with tab_whiff:
-        st.markdown("#### (B) If he swings, will he miss?")
+        st.markdown("#### If he swings, will he miss?")
         render_model_panel(insights["whiff"], "whiff rate (swings only)")
         if pred_grid is not None and "pred_whiff_prob" in pred_grid.columns:
             st.plotly_chart(
@@ -474,14 +321,13 @@ else:
                 use_container_width=True,
             )
         if batter_preds is not None and "mean_pred_whiff" in batter_preds.columns:
-            name_lookup_pred = df_base[["batter", "player_name"]].drop_duplicates()
             st.plotly_chart(
                 build_batter_pred_figure(
                     batter_preds,
-                    name_lookup_pred,
+                    name_lookup,
                     "actual_whiff_rate",
                     "mean_pred_whiff",
-                    "Actual whiff % (September, all pitches)",
+                    "Actual whiff % (September)",
                     "Predicted whiff-if-swing %",
                     "September: predicted vs. actual whiff rate",
                 ),
@@ -490,157 +336,77 @@ else:
 
     with tab_combo:
         st.markdown("#### Example pitches — both models together")
-        examples = pd.DataFrame(insights["example_pitches"])
-        example_cols = [
-            "label",
-            "pitch_type",
-            "count",
-            "runners_on",
-            "swing_prob_pct",
-            "whiff_if_swing_pct",
-            "swing_whiff_pct",
-            "swing_takeaway",
-            "whiff_takeaway",
-        ]
-        example_cols = [c for c in example_cols if c in examples.columns]
-        st.dataframe(
-            examples[example_cols].rename(
-                columns={
-                    "label": "Scenario",
-                    "pitch_type": "Pitch type",
-                    "count": "Count",
-                    "runners_on": "Runners on",
-                    "swing_prob_pct": "P(swing) %",
-                    "whiff_if_swing_pct": "P(whiff|swing) %",
-                    "swing_whiff_pct": "P(swing & whiff) %",
-                    "swing_takeaway": "Swing takeaway",
-                    "whiff_takeaway": "Whiff takeaway",
-                }
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.caption(
-            "P(swing & whiff) = P(swing) × P(whiff | swing). "
-            "That is the estimated chance of a swinging strike on this pitch profile."
-        )
+        examples = pd.DataFrame(insights.get("example_pitches", []))
+        if examples.empty:
+            st.caption("No example scenarios in insights file.")
+        else:
+            display_cols = [
+                c
+                for c in [
+                    "label",
+                    "pitch_type",
+                    "count",
+                    "runners_on",
+                    "swing_prob_pct",
+                    "whiff_if_swing_pct",
+                    "swing_whiff_pct",
+                    "swing_takeaway",
+                    "whiff_takeaway",
+                ]
+                if c in examples.columns
+            ]
+            st.dataframe(
+                examples[display_cols].rename(
+                    columns={
+                        "label": "Scenario",
+                        "pitch_type": "Pitch type",
+                        "count": "Count",
+                        "runners_on": "Runners on",
+                        "swing_prob_pct": "P(swing) %",
+                        "whiff_if_swing_pct": "P(whiff|swing) %",
+                        "swing_whiff_pct": "P(swing & whiff) %",
+                        "swing_takeaway": "Swing takeaway",
+                        "whiff_takeaway": "Whiff takeaway",
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption("P(swing & whiff) = P(swing) × P(whiff | swing).")
 
-# --- PLAYER BREAKDOWN ---
-st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
-st.markdown('<div class="whiff-section-label">Player Breakdown</div>', unsafe_allow_html=True)
-p_list = sorted(pitch_data["batter_name"].dropna().unique())
+    with tab_notes:
+        st.markdown(
+            """
+            **Refinement checklist (offline)**
+            - Re-pull Statcast if pitch-type filters change: `python notebooks/statcast_pull.py`
+            - Regenerate EDA after feature changes: `python notebooks/exploratory_analysis.py`
+            - Retrain models: `python notebooks/train_whiff_model.py`
+            - Refresh Pitch Lab deploy bundles (included in train script)
 
-col_control, col_headshot = st.columns([3, 1])
-
-with col_control:
-    selected_player_box = st.selectbox(
-        "Select Hitter for Performance Breakdown",
-        p_list,
-        index=p_list.index("Shohei Ohtani") if "Shohei Ohtani" in p_list else 0,
-    )
-    p_whiffs = pitch_data[pitch_data["batter_name"] == selected_player_box].copy()
-    p_whiffs["date_str"] = p_whiffs["game_date"].dt.strftime("%m-%d")
-
-    st.markdown(f"### {selected_player_box}")
-
-    sub_m1, sub_m2, sub_m3 = st.columns(3)
-    sub_m1.metric("Total Whiffs Detected", len(p_whiffs))
-    sub_m2.metric("Out-of-Zone Chases", len(p_whiffs[p_whiffs["zone_split"] == "Out of Zone"]))
-    sub_m3.metric("Player Peak EI", f"{p_whiffs['ei'].max():.0f}" if not p_whiffs.empty else "0")
-
-with col_headshot:
-    pid = int(p_whiffs["batter"].iloc[0]) if not p_whiffs.empty else None
-    if pid:
-        st.image(
-            f"https://img.mlbstatic.com/mlb-photos/image/upload/w_180,q_auto:best/v1/people/{pid}/headshot/67/current",
-            width=145,
+            **Recent feature engineering**
+            - `count_state` (Hitter Ahead / Pitcher Ahead / Even / Full) + `is_two_strike`
+            - `speed_diff` instead of raw effective velocity (reduces multicollinearity)
+            - Attack zones aligned to FanGraphs Heart / Shadow / Chase / Waste definitions
+            """
         )
 
-if not p_whiffs.empty:
-    fig_sz = go.Figure()
-    fig_sz.add_trace(
-        go.Scatter(
-            x=p_whiffs["plate_x"],
-            y=p_whiffs["plate_z"],
-            mode="markers",
-            marker=dict(size=11, color=p_whiffs["ei"], colorscale="Viridis", showscale=True, colorbar=dict(title="EI")),
-            customdata=p_whiffs[["player_name", "pitch_name", "runners_on", "count", "miss_dist_in", "ei", "date_str"]],
-            hovertemplate=(
-                "<b>%{customdata[0]}'s %{customdata[1]}</b><br>"
-                "Date: %{customdata[6]}<br>"
-                "Count: %{customdata[3]}<br>"
-                "Runners On: %{customdata[2]}<br>"
-                "Miss Distance: %{customdata[4]:.0f} in<br>"
-                "Embarrassment Index: %{customdata[5]:.0f}<br>"
-                "<extra></extra>"
-            ),
-        )
-    )
-    avg_bot, avg_top = p_whiffs["sz_bot"].mean(), p_whiffs["sz_top"].mean()
-    fig_sz.add_shape(type="rect", x0=-0.708, x1=0.708, y0=avg_bot, y1=avg_top, line=dict(color="#f5efe3", width=3))
-    fig_sz.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(range=[-3, 3], title="Horizontal (catcher's view: ← 3B | 1B →)", scaleanchor="y", scaleratio=1),
-        yaxis=dict(range=[0, 4.5], title="Vertical (ft)"),
-        height=720,
-        margin=dict(t=5, b=5, l=0, r=0),
-    )
-    st.plotly_chart(fig_sz, use_container_width=True)
 
-st.markdown('<div class="whiff-section-label">Player View</div>', unsafe_allow_html=True)
-st.markdown(f"### {selected_player_box}'s Top Whiffs")
-st.dataframe(
-    p_whiffs[["player_name", "pitch_name", "count", "runners_on", "miss_dist_in", "ei"]]
-    .sort_values("ei", ascending=False)
-    .head(10)
-    .rename(
-        columns={
-            "player_name": "Pitcher",
-            "pitch_name": "Pitch Type",
-            "count": "Count",
-            "runners_on": "Runners On",
-            "miss_dist_in": "Miss Dist (in)",
-            "ei": "EI",
-        }
-    ),
-    use_container_width=True,
-    hide_index=True,
+# --- HEADER ---
+st.title("The Whiff List 💨")
+st.markdown(
+    '<div class="whiff-subtle">MLB swing & whiff modeling — Statcast 2025 · hybrid league + personalization strategy</div>',
+    unsafe_allow_html=True,
 )
 
-batter_stand = (
-    pitch_data.groupby("batter")["stand"]
-    .agg(lambda s: s.mode().iloc[0] if not s.empty else "R")
-    .reset_index()
-    .rename(columns={"stand": "bats"})
+tab_lab, tab_use, tab_eda, tab_model = st.tabs(
+    ["The Whiff Lab", "Real World Use", "Exploratory Data Analysis", "Model Refinement"]
 )
 
-# --- PITCH LAB ---
-st.markdown('<div class="whiff-divider"></div>', unsafe_allow_html=True)
-st.markdown('<div class="whiff-section-label">Pitch Lab</div>', unsafe_allow_html=True)
-st.markdown("### Interactive Swing & Whiff Simulator")
-render_pitch_lab(df_base, batter_stand)
-
-# --- LEADERBOARD ---
-st.markdown('<div class="whiff-section-label">League View</div>', unsafe_allow_html=True)
-st.markdown("### Chase Leaderboard", help="Minimum 502 At-Bats required to qualify.")
-
-avg_ei_ozone = pitch_data[pitch_data["zone_split"] == "Out of Zone"].groupby("batter")["ei"].mean().reset_index().rename(columns={"ei": "avg_ei"})
-df_lb = df_base.merge(avg_ei_ozone, on="batter", how="left").sort_values("avg_ei", ascending=False).reset_index(drop=True)
-df_lb["Rank"] = df_lb.index + 1
-df_lb["Whiff%"] = (df_lb["whiff_rate"] * 100).round(1)
-
-# FIXED: Removed specific metric objects, embedded qualified hitter details seamlessly as a low-profile line
-st.markdown(f'<div class="leaderboard-sub"><b>Qualified Hitters:</b> {len(df_lb)} (Dataset strictly restricted to active batting title contenders)</div>', unsafe_allow_html=True)
-
-lb_display = df_lb[["Rank", "player_name", "ab", "swings", "whiffs", "Whiff%", "avg_ei"]].rename(columns={"player_name": "Batter", "ab": "ABs", "avg_ei": "Avg EI"})
-st.dataframe(lb_display, use_container_width=True, hide_index=True)
-
-# --- WORST WHIFFERS ---
-st.markdown('<div class="whiff-section-label">Worst Swings</div>', unsafe_allow_html=True)
-st.markdown("### Worst Whiffers")
-worst_df = pitch_data[pitch_data["zone_split"] == "Out of Zone"].sort_values("ei", ascending=False).head(25)
-st.dataframe(worst_df[["batter_name", "player_name", "pitch_name", "count", "runners_on", "miss_dist_in", "ei"]].rename(
-    columns={"batter_name": "Batter", "player_name": "Pitcher", "pitch_name": "Pitch Type", "count": "Count", "runners_on": "Runners On", "miss_dist_in": "Miss Dist (in)", "ei": "EI"}
-), use_container_width=True, hide_index=True)
+with tab_lab:
+    tab_whiff_lab()
+with tab_use:
+    tab_real_world_use()
+with tab_eda:
+    tab_exploratory_data_analysis()
+with tab_model:
+    tab_model_refinement()
