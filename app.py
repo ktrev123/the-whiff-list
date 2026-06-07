@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from src.eda_dashboard import render_eda_dashboard
 from src.model_viz import (
     build_batter_pred_figure,
     build_calibration_figure,
@@ -57,6 +58,11 @@ div[data-testid="stMetric"] {
 .whiff-section-label {
     color: var(--whiff-gold); font-size: 0.86rem; font-weight: 700;
     text-transform: uppercase; margin-bottom: 0.25rem;
+}
+.eda-metric-split {
+    height: 72px;
+    border-left: 1px solid var(--whiff-border);
+    margin: 12px auto;
 }
 .methodology-box {
     background-color: rgba(255, 255, 255, 0.02);
@@ -149,6 +155,89 @@ div[data-testid="stMetric"] {
     font-size: 0.95rem;
     opacity: 0.45;
     margin: 0.25rem 0 0.5rem;
+}
+.whiff-input-section {
+    margin: 1.25rem 0 0.5rem;
+}
+.whiff-input-section h4 {
+    color: var(--whiff-gold);
+    font-size: 0.86rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 0.75rem;
+}
+.whiff-location-panel {
+    border: 1px dashed var(--whiff-border);
+    border-radius: 16px;
+    padding: 14px 16px 8px;
+    margin-top: 0.5rem;
+    background: rgba(255, 255, 255, 0.02);
+}
+.whiff-location-panel-label {
+    color: var(--whiff-cream-muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+}
+.whiff-count-display {
+    border: 1px solid var(--whiff-border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-top: 0.5rem;
+    color: var(--whiff-cream);
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+.whiff-location-mode {
+    border: 1px solid var(--whiff-border);
+    border-radius: 14px;
+    padding: 12px 16px;
+    margin: 0.75rem 0;
+    background: rgba(255, 255, 255, 0.02);
+}
+.whiff-location-mode-active {
+    border-color: var(--whiff-gold);
+    background: rgba(212, 169, 55, 0.08);
+}
+.whiff-match-note {
+    color: var(--whiff-cream-muted);
+    font-size: 0.88rem;
+    font-weight: 400;
+}
+.whiff-prescription-banner {
+    border: 1px solid var(--whiff-gold);
+    border-radius: 16px;
+    padding: 18px 20px;
+    margin: 12px 0 16px;
+    background: linear-gradient(135deg, rgba(212, 169, 55, 0.12) 0%, rgba(15, 23, 42, 0.6) 100%);
+}
+.whiff-prescription-label {
+    color: var(--whiff-gold);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+}
+.whiff-prescription-headline {
+    color: var(--whiff-cream);
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1.35;
+    margin-bottom: 8px;
+}
+.whiff-prescription-meta {
+    color: var(--whiff-cream-muted);
+    font-size: 0.86rem;
+    margin-bottom: 8px;
+}
+.whiff-prescription-rationale {
+    color: var(--whiff-cream-muted);
+    font-size: 0.92rem;
+    line-height: 1.45;
 }
 </style>
 """,
@@ -247,60 +336,7 @@ def tab_real_world_use():
 def tab_exploratory_data_analysis():
     st.markdown('<div class="whiff-section-label">Methodology</div>', unsafe_allow_html=True)
     st.header("Exploratory Data Analysis")
-
-    st.markdown(
-        f"""
-        <div class="methodology-box">
-        <h4>What this covers</h4>
-        <p>2025 MLB Statcast pitch-level data ({SEASON_START} – {SEASON_END}), qualified hitters (502+ AB),
-        competitive pitch types only. Train split: <b>Mar–Aug</b>; September holdout for model evaluation.</p>
-        <p>The EDA justifies a <b>hybrid modeling strategy</b>: league-wide swing/whiff models as the default,
-        with hitter-specific personalization when sample size and residuals support it (~600-pitch crossover).</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.subheader("Report sections")
-    sections = [
-        ("Data Quality", "Velocity (lower-fence only) and spin (two-sided IQR) outlier removal per pitch type."),
-        ("Count & Pitch Type", "All 12 counts; swing/whiff by Fastballs / Breaking Balls / Off-Speed."),
-        ("Hitter Heterogeneity", "Distribution of swing, whiff-if-swing, and chase rates across qualified hitters."),
-        ("Pitch Physics", "Velocity, spin, and movement summaries by pitch category."),
-        ("Plate Location", "Swing and whiff-if-swing heatmaps by horizontal / vertical location."),
-        ("Correlations", "Contextual variables → swing; pitch physics → whiff (no redundant speed_diff in matrix)."),
-        ("Attack Zones", "FanGraphs Heart / Shadow / Chase / Waste; personalization gains by zone."),
-        ("League vs Personalized", "Learning curve, residuals, and hitter-specific swing model comparison."),
-        ("Feature Importance & Conclusions", "Random-forest drivers and production recommendations."),
-    ]
-    for title, desc in sections:
-        st.markdown(f"**{title}** — {desc}")
-
-    st.subheader("Interactive report")
-    if EDA_REPORT_FILE.exists():
-        st.success(f"Found local report: `{EDA_REPORT_FILE.relative_to(ROOT)}`")
-        st.markdown(
-            f"[Open full HTML report]({EDA_REPORT_FILE.resolve().as_uri()}) "
-            "(best in a new browser tab — Plotly charts are interactive)."
-        )
-        with st.expander("Preview report (embedded)"):
-            report_html = EDA_REPORT_FILE.read_text(encoding="utf-8")
-            st.components.v1.html(report_html, height=720, scrolling=True)
-    else:
-        st.warning("Report not generated yet. From the project folder run:")
-        st.code("python notebooks/exploratory_analysis.py", language="bash")
-        st.caption("Output path: `data/reports/eda_report.html` (gitignored locally).")
-
-    st.subheader("Key findings (summary)")
-    st.markdown(
-        """
-        - **Attack zones:** Heart ~72% swing; Waste ~21% swing (after fixing zone sign logic).
-        - **Personalization:** Hitter models beat league for most qualified hitters past ~600 training pitches.
-        - **Zone gains:** Largest log-loss improvements in **Chase** and **Shadow**; Waste gains are positive but noisier.
-        - **Features:** Location and count drive swing; pitch physics matter more for whiff. Models use `count_state`
-          + `is_two_strike` and `speed_diff` (not collinear effective velocity).
-        """
-    )
+    render_eda_dashboard()
 
 
 def tab_model_refinement():

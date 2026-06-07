@@ -18,10 +18,30 @@ from src.attack_zones import (
     ZONE_FILL,
     ZONE_ORDER,
     assign_attack_zone,
+    infer_horizontal,
+    infer_vertical,
     random_pitch_location,
     zone_description,
 )
 from src.hitter_rates import hitter_stats_html
+from src.pitch_lab_inputs import (
+    PITCH_FAMILIES,
+    PITCH_FAMILY_DEFAULT_CODE,
+    PITCH_FAMILY_DISPLAY_PITCH,
+    VELOCITY_INTENT_TO_TIER,
+    apply_physics_tiers,
+    count_leverage_label,
+    format_count_display,
+)
+from src.pitch_prescription import (
+    HORIZONTAL_OPTIONS,
+    VERTICAL_OPTIONS,
+    VELOCITY_INTENTS,
+    build_target_heatmap_placeholder,
+    compare_strategy_guess,
+    match_row,
+    mock_count_prescription,
+)
 from src.whiff_features import (
     MODEL_INPUT_COLS,
     PITCH_METRIC_COLS,
@@ -40,27 +60,50 @@ PITCH_LAB_ZONES_FILE = MODEL_DIR / "pitch_lab_hitter_zones.csv"
 STATCAST_FILE = ROOT / "data" / "statcast_2025.parquet"
 
 PITCH_CATEGORY_DEFAULT = {
-    "Fastballs": "FF",
-    "Breaking Balls": "SL",
-    "Off-Speed": "CH",
+    "Fastball": "FF",
+    "Breaking": "SL",
+    "Offspeed": "CH",
+    **{
+        "Fastballs": "FF",
+        "Breaking Balls": "SL",
+        "Off-Speed": "CH",
+    },
 }
 
 CATEGORY_PITCH_LABELS = {
-    "Fastballs": {
+    "Fastball": {
         "4-Seam Fastball": "FF",
         "Sinker": "SI",
         "Cutter": "FC",
     },
-    "Breaking Balls": {
+    "Breaking": {
         "Slider": "SL",
         "Curveball": "CU",
         "Sweeper": "SV",
         "Knuckle Curve": "KC",
         "Sweeper (ST)": "ST",
     },
-    "Off-Speed": {
+    "Offspeed": {
         "Changeup": "CH",
         "Splitter": "FS",
+    },
+    **{
+        "Fastballs": {
+            "4-Seam Fastball": "FF",
+            "Sinker": "SI",
+            "Cutter": "FC",
+        },
+        "Breaking Balls": {
+            "Slider": "SL",
+            "Curveball": "CU",
+            "Sweeper": "SV",
+            "Knuckle Curve": "KC",
+            "Sweeper (ST)": "ST",
+        },
+        "Off-Speed": {
+            "Changeup": "CH",
+            "Splitter": "FS",
+        },
     },
 }
 
@@ -72,7 +115,9 @@ PITCH_NAME_TO_TYPE = {
 
 
 def _capture_chart_click_pending() -> None:
-    """Remember chart click as pending location — ball moves only on Pitch it."""
+    """Remember chart click as pending location — custom mode only."""
+    if st.session_state.get("lab_location_mode") != "Customize Exact Pitch":
+        return
     chart_state = st.session_state.get("lab_zone_chart")
     if chart_state is None or not getattr(chart_state, "selection", None):
         return
@@ -97,18 +142,33 @@ def _capture_chart_click_pending() -> None:
     st.session_state.lab_pending_pz = round(float(np.clip(float(pt["y"]), 0.8, 4.2)), 2)
 
 
-def _commit_pitch(
+def _apply_plot_guess_location(
+    plate_x: float,
+    plate_z: float,
     sz_bot: float,
     sz_top: float,
-    platoon_bats: str,
+    bats: str,
 ) -> None:
-    """Apply pending chart click or randomize from placement picks."""
+    """Derive vertical / horizontal guess buckets from a map click."""
+    st.session_state.lab_guess_vert = infer_vertical(plate_z, sz_top, sz_bot)
+    st.session_state.lab_guess_horiz = infer_horizontal(plate_x, bats)
+
+
+def _commit_pitch(sz_bot: float, sz_top: float, platoon_bats: str) -> None:
+    """Apply chart click (custom) or randomize from placement picks (random mode)."""
+    mode = st.session_state.get("lab_location_mode", "Pick a Random Pitch")
     pending_x = st.session_state.get("lab_pending_px")
     pending_z = st.session_state.get("lab_pending_pz")
 
-    if pending_x is not None and pending_z is not None:
+    if mode == "Customize Exact Pitch":
+        if pending_x is None or pending_z is None:
+            st.session_state.lab_need_map_click = True
+            return
         st.session_state.lab_px = float(pending_x)
         st.session_state.lab_pz = float(pending_z)
+        _apply_plot_guess_location(
+            st.session_state.lab_px, st.session_state.lab_pz, sz_bot, sz_top, platoon_bats
+        )
     else:
         if "lab_rng" not in st.session_state:
             st.session_state.lab_rng = np.random.default_rng()
@@ -127,7 +187,8 @@ def _commit_pitch(
     st.session_state.lab_pending_px = None
     st.session_state.lab_pending_pz = None
     st.session_state.lab_last_sel_sig = None
-    st.rerun()
+    st.session_state.lab_need_map_click = False
+    st.session_state.lab_has_pitched = True
 
 
 MLB_HEADSHOT_URL = (
@@ -330,6 +391,31 @@ def _zone_map_points(sz_bot: float, sz_top: float) -> tuple[list[float], list[fl
             z_pts.append(float(z))
             colors.append(ZONE_FILL[zone])
     return x_pts, z_pts, colors
+
+
+def render_hitter_card(batter_id: int, player_name: str, raw_bats: str) -> None:
+    """Hitter headshot + stats row (handedness-aware), for display above the zone map."""
+    bats_label = batter_display_label(raw_bats)
+    stats_html = hitter_stats_html(batter_id)
+    card_html = f"""
+    <div class="whiff-hitter-card">
+        <img src="{mlb_headshot_url(batter_id)}" alt="{player_name}" class="whiff-hitter-photo"/>
+        <div class="whiff-hitter-meta">
+            <div class="whiff-hitter-name">{player_name}</div>
+            <div class="whiff-hitter-bats">{bats_label}</div>
+            {stats_html}
+        </div>
+    </div>
+    """
+    platoon_bats = resolve_bats_for_platoon(raw_bats)
+    if platoon_bats == "L":
+        spacer, card_col = st.columns([0.55, 1.45])
+        with card_col:
+            st.markdown(card_html, unsafe_allow_html=True)
+    else:
+        card_col, spacer = st.columns([1.45, 0.55])
+        with card_col:
+            st.markdown(card_html, unsafe_allow_html=True)
 
 
 def render_hitter_banner(
@@ -541,6 +627,85 @@ def guess_label(prob: float, guess_yes: bool) -> str:
     return "✗ Model disagrees"
 
 
+def _render_strategy_feedback(
+    *,
+    has_pitched: bool,
+    balls: int,
+    strikes: int,
+    runners_on: int,
+    guess_family: str,
+    guess_vertical: str,
+    guess_horizontal: str,
+    guess_velocity: str,
+) -> None:
+    """Show prescription and compare user strategy guesses after Pitch It!"""
+    st.markdown("---")
+    st.markdown("#### 4 · Results")
+
+    if not has_pitched:
+        st.info("Lock in your strategy above, then click **Pitch It!** to reveal the optimal prescription.")
+        return
+
+    rx = mock_count_prescription(balls, strikes, runners_on)
+    cmp = compare_strategy_guess(
+        guess_family=guess_family,
+        guess_vertical=guess_vertical,
+        guess_horizontal=guess_horizontal,
+        guess_velocity=guess_velocity,
+        recommendation=rx,
+    )
+
+    st.markdown(
+        f"""
+        <div class="whiff-prescription-banner">
+            <div class="whiff-prescription-label">Optimal prescription</div>
+            <div class="whiff-prescription-headline">{rx["headline"]}</div>
+            <div class="whiff-prescription-meta">
+                Count: <b>{rx["count"]}</b> · Velocity intent: <b>{rx["velocity_intent"]}</b> · {rx["confidence"]}
+            </div>
+            <div class="whiff-prescription-rationale">{rx["rationale"]}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("**Your strategy vs. optimal**")
+    st.markdown(
+        match_row(
+            "Pitch Family Match (The Strategy)",
+            bool(cmp["family_match"]),
+            f"You guessed **{guess_family}** · Optimal: **{rx['pitch_family']}**",
+        )
+    )
+    st.markdown(
+        match_row(
+            "Location Match (Vertical & Horizontal)",
+            bool(cmp["location_match"]),
+            "Location drives ~33% of the outcome · "
+            f"You guessed **{guess_horizontal} / {guess_vertical}** · "
+            f"Optimal: **{rx['horizontal']} / {rx['vertical']}**",
+        )
+    )
+    st.markdown(
+        match_row(
+            "Velocity Intent Match",
+            bool(cmp["velocity_match"]),
+            "Speed drives ~19% of whiff execution · "
+            f"You guessed **{guess_velocity}** · Optimal: **{rx['velocity_intent']}**",
+        )
+    )
+
+    score = int(cmp["score"])
+    if score == 3:
+        st.success(f"Perfect read — {score}/3 strategy elements matched.")
+    elif score >= 2:
+        st.info(f"Strong plan — {score}/3 strategy elements matched.")
+    else:
+        st.warning(f"Room to improve — {score}/3 strategy elements matched.")
+
+    st.plotly_chart(build_target_heatmap_placeholder(), use_container_width=True, key="lab_target_heatmap")
+
+
 def render_whiff_lab(
     qualified_df: pd.DataFrame | None = None,
     batter_stand: pd.DataFrame | None = None,
@@ -576,21 +741,27 @@ def render_whiff_lab(
     if "lab_pending_px" not in st.session_state:
         st.session_state.lab_pending_px = None
         st.session_state.lab_pending_pz = None
+    if "lab_has_pitched" not in st.session_state:
+        st.session_state.lab_has_pitched = False
+    if "lab_location_mode" not in st.session_state:
+        st.session_state.lab_location_mode = "Pick a Random Pitch"
+    if "lab_guess_family" not in st.session_state:
+        st.session_state.lab_guess_family = "Fastball"
+    if "lab_guess_vert" not in st.session_state:
+        st.session_state.lab_guess_vert = "Middle"
+    if "lab_guess_horiz" not in st.session_state:
+        st.session_state.lab_guess_horiz = "Middle"
+    if "lab_guess_velocity" not in st.session_state:
+        st.session_state.lab_guess_velocity = "Average"
 
     _capture_chart_click_pending()
 
     st.markdown(
         """
         <div class="methodology-box">
-            <h4>How to build a pitch</h4>
-            <p>Set up the at-bat below — hitter, pitch type, count, runners, attack zone, and placement.
-            The ball <b>does not move</b> until you click <b>Pitch it</b>.</p>
-            <ul>
-                <li><b>Pick your own spot:</b> click the zone map to mark a location (gold dashed ring),
-                then <b>Pitch it</b>.</li>
-                <li><b>Random pitch:</b> choose attack zone + placement vertical + placement horizontal,
-                then <b>Pitch it</b> for a random spot in that bucket.</li>
-            </ul>
+            <h4>Game-planning flow</h4>
+            <p>Define the situation, set up pitch location, <b>lock your strategy guess</b>, then click
+            <b>Pitch It!</b> to see the optimal prescription and how your read compares.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -599,16 +770,31 @@ def render_whiff_lab(
     hitters = qualified_df.sort_values("player_name")["player_name"].tolist()
     default_idx = hitters.index("Shohei Ohtani") if "Shohei Ohtani" in hitters else 0
 
-    ctrl1, ctrl2, ctrl3, ctrl4, ctrl5 = st.columns([2.2, 1.4, 0.8, 0.8, 1.0])
-    with ctrl1:
+    # --- 1. Define the Situation ---
+    st.markdown('<div class="whiff-input-section"><h4>1 · Define the Situation</h4></div>', unsafe_allow_html=True)
+
+    sit_hitter, sit_balls, sit_strikes, sit_runners = st.columns([2.2, 0.7, 0.7, 1.0])
+    with sit_hitter:
         hitter = st.selectbox("Hitter", hitters, index=default_idx, key="lab_hitter")
+    with sit_balls:
+        balls = st.selectbox("Balls", [0, 1, 2, 3], index=2, key="lab_balls")
+    with sit_strikes:
+        strikes = st.selectbox("Strikes", [0, 1, 2], index=2, key="lab_strikes")
+    with sit_runners:
+        runners_on = st.selectbox("Runners on", [0, 1, 2, 3], key="lab_runners")
+
+    st.markdown(
+        f'<div class="whiff-count-display">{format_count_display(balls, strikes)}</div>',
+        unsafe_allow_html=True,
+    )
+
     batter_id = int(qualified_df.loc[qualified_df["player_name"] == hitter, "batter"].iloc[0])
     raw_bats = batter_handedness(batter_stand, batter_id)
     platoon_bats = resolve_bats_for_platoon(raw_bats)
     sz_bot, sz_top = hitter_strike_zone(zones_df, profiles, batter_id)
 
     if raw_bats == "S":
-        st.info("**Switch hitter** — choose which side he's batting from for inside/outside on the chart.")
+        st.info("**Switch hitter** — choose batting side for inside/outside labels.")
         st.radio(
             "Batting side (matchup)",
             options=["R", "L"],
@@ -618,72 +804,59 @@ def render_whiff_lab(
         )
         platoon_bats = resolve_bats_for_platoon(raw_bats)
 
-    with ctrl2:
-        pitch_category = st.selectbox(
-            "Pitch family",
-            list(PITCH_CATEGORY_DEFAULT.keys()),
-            key="lab_pitch_category",
-        )
-    with ctrl3:
-        balls = st.selectbox("Balls", [0, 1, 2, 3], index=2, key="lab_balls")
-    with ctrl4:
-        strikes = st.selectbox("Strikes", [0, 1, 2], index=2, key="lab_strikes")
-    with ctrl5:
-        runners_on = st.selectbox("Runners on", [0, 1, 2, 3], key="lab_runners")
+    inside_label, outside_label = plate_side_labels(platoon_bats)
 
-    pitch_options = CATEGORY_PITCH_LABELS[pitch_category]
-    pitch_name = st.selectbox(
-        "Specific pitch (league-median physics)",
-        list(pitch_options.keys()),
-        key="lab_pitch_variant",
+    # --- 2. Setup the Pitch ---
+    st.markdown('<div class="whiff-input-section"><h4>2 · Setup the Pitch</h4></div>', unsafe_allow_html=True)
+
+    location_mode = st.radio(
+        "Setup method",
+        ["Pick a Random Pitch", "Customize Exact Pitch"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="lab_location_mode",
     )
-    pitch_type = pitch_options[pitch_name]
-    pitch_profile = profile_lookup.get(pitch_type, {})
-    if not pitch_profile:
-        pitch_profile = {col: float(profiles.get(col, 0)) for col in PITCH_METRIC_COLS}
 
-    plate_x = float(st.session_state.lab_px)
-    plate_z = float(st.session_state.lab_pz)
+    if location_mode == "Pick a Random Pitch":
+        st.markdown(
+            '<div class="whiff-location-mode whiff-location-mode-active">'
+            "<b>Random pitch</b> — choose attack zone and placement; location randomizes on <b>Pitch It!</b></div>",
+            unsafe_allow_html=True,
+        )
+        loc_zone, loc_vert, loc_horiz = st.columns(3)
+        with loc_zone:
+            st.selectbox("Attack zone", ZONE_ORDER, key="lab_zone_pick")
+        with loc_vert:
+            st.selectbox("Vertical placement", VERTICAL_ORDER, key="lab_vert_pick")
+        with loc_horiz:
+            st.selectbox(
+                f"Horizontal placement ({inside_label} / Middle / {outside_label})",
+                HORIZONTAL_ORDER,
+                key="lab_horiz_pick",
+            )
+    else:
+        st.markdown(
+            '<div class="whiff-location-mode whiff-location-mode-active">'
+            "<b>Custom pitch</b> — click the zone map to pin an exact location.</div>",
+            unsafe_allow_html=True,
+        )
+
+    render_hitter_card(batter_id, hitter, raw_bats)
+
     pending_x = st.session_state.lab_pending_px
     pending_z = st.session_state.lab_pending_pz
 
-    inside_label, outside_label = plate_side_labels(platoon_bats)
-
-    st.markdown("**Attack zone**")
-    st.radio(
-        "Attack zone",
-        ZONE_ORDER,
-        horizontal=True,
-        key="lab_zone_pick",
-        label_visibility="collapsed",
-    )
-
-    st.markdown("**Placement vertical**")
-    st.radio(
-        "Placement vertical",
-        VERTICAL_ORDER,
-        horizontal=True,
-        key="lab_vert_pick",
-        label_visibility="collapsed",
-    )
-
     st.markdown(
-        f"**Placement horizontal** — Inside ({inside_label}) · Middle · Outside ({outside_label})"
-    )
-    st.radio(
-        "Placement horizontal",
-        HORIZONTAL_ORDER,
-        horizontal=True,
-        key="lab_horiz_pick",
-        label_visibility="collapsed",
+        """
+        <div class="whiff-location-panel">
+            <div class="whiff-location-panel-label">Interactive location selector</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    pitch_ready = st.button("Pitch it", type="primary", key="lab_pitch_it", use_container_width=True)
-    if pitch_ready:
-        _commit_pitch(sz_bot, sz_top, platoon_bats)
-
-    attack_zone = assign_attack_zone(plate_x, plate_z, sz_top, sz_bot)
-    render_hitter_banner(batter_id, hitter, raw_bats, attack_zone, plate_x, plate_z)
+    plate_x = float(st.session_state.lab_px)
+    plate_z = float(st.session_state.lab_pz)
 
     zone_fig = build_location_figure(
         plate_x,
@@ -691,9 +864,9 @@ def render_whiff_lab(
         sz_bot,
         sz_top,
         bats=platoon_bats,
-        attack_zone=attack_zone,
-        pending_x=pending_x,
-        pending_z=pending_z,
+        attack_zone=assign_attack_zone(plate_x, plate_z, sz_top, sz_bot),
+        pending_x=pending_x if location_mode == "Customize Exact Pitch" else None,
+        pending_z=pending_z if location_mode == "Customize Exact Pitch" else None,
     )
     st.plotly_chart(
         zone_fig,
@@ -702,88 +875,119 @@ def render_whiff_lab(
         selection_mode="points",
         key="lab_zone_chart",
     )
-    if pending_x is not None and pending_z is not None:
-        st.caption(
-            f"Pending location marked at **{pending_x:+.2f} ft H · {pending_z:.2f} ft V** — click **Pitch it** to throw there."
-        )
-    else:
-        st.caption(
-            "Click the zone map to mark your own spot (optional), or use placement picks + **Pitch it** for a random location."
-        )
 
-    attack_zone = assign_attack_zone(plate_x, plate_z, sz_top, sz_bot)
-    count_label = f"{balls}-{strikes}"
-    runners_label = {0: "Bases empty", 1: "Runner on", 2: "Runners on", 3: "Loaded"}.get(runners_on, "")
-    st.caption(
-        f"**{hitter}** · {pitch_category} ({pitch_name}) · **{count_label}** count · {runners_label} · "
-        f"zone sized to hitter height ({sz_bot:.2f}–{sz_top:.2f} ft). "
-        f"Physics default: {pitch_profile.get('release_speed', 0):.1f} mph."
+    if location_mode == "Customize Exact Pitch":
+        if pending_x is not None and pending_z is not None:
+            st.caption(f"Selected: **{pending_x:+.2f} ft H · {pending_z:.2f} ft V**")
+        else:
+            st.caption("Click the zone map to select your exact pitch location.")
+    else:
+        st.caption("Preview only — final location randomizes within your placement bucket.")
+
+    # --- 3. Formulate Your Strategy (Guess) — lock before pitching ---
+    st.markdown(
+        '<div class="whiff-input-section"><h4>3 · Formulate Your Strategy (Guess)</h4></div>',
+        unsafe_allow_html=True,
     )
 
-    if not models_ready:
-        st.info(
-            "Model reveal is optional — bundles not found. Run `python notebooks/train_whiff_model.py` "
-            "to enable swing / whiff predictions."
+    custom_mode = location_mode == "Customize Exact Pitch"
+    plot_px = pending_x if pending_x is not None else (
+        float(st.session_state.lab_px) if st.session_state.get("lab_has_pitched") else None
+    )
+    plot_pz = pending_z if pending_z is not None else (
+        float(st.session_state.lab_pz) if st.session_state.get("lab_has_pitched") else None
+    )
+    if custom_mode and plot_px is not None and plot_pz is not None:
+        _apply_plot_guess_location(plot_px, plot_pz, sz_bot, sz_top, platoon_bats)
+
+    if custom_mode:
+        st.markdown(
+            "Lock in pitch family and velocity intent. **Vertical and horizontal location are set by your map click.**"
         )
-        return
+    else:
+        st.markdown("Lock in your full pitch call **before** clicking **Pitch It!**")
 
-    model_note = swing_bundle.get("model_name", "model")
-    st.caption(f"Predictions use deployable **{model_note}** models when you reveal below.")
-
-    st.markdown("#### Your guess")
-    g1, g2 = st.columns(2)
-    guess_swing = g1.radio(f"Will **{hitter}** swing?", ["Yes", "No"], horizontal=True, key="lab_guess_swing")
-    swing_no = guess_swing == "No"
+    g1, g2, g3, g4 = st.columns(4)
+    with g1:
+        guess_family = st.selectbox("Pitch family", PITCH_FAMILIES, key="lab_guess_family")
     with g2:
-        guess_whiff = st.radio(
-            "Will it be a whiff?",
-            ["Yes", "No"],
-            horizontal=True,
-            key="lab_guess_whiff",
-            disabled=swing_no,
-        )
-        if swing_no:
-            st.caption("Not applicable — you guessed take.")
-
-    reveal = st.button("Reveal model probabilities", type="primary", key="lab_reveal")
-
-    if reveal:
-        row = build_pitch_row(
-            plate_x, plate_z, sz_bot, sz_top, balls, strikes, runners_on, pitch_type, pitch_profile
-        )
-        probs = predict_probs(swing_bundle, whiff_bundle, row)
-
-        st.markdown("#### Model says")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("P(Swing)", f"{probs['swing'] * 100:.1f}%")
-        m2.metric("P(Whiff | Swing)", f"{probs['whiff_if_swing'] * 100:.1f}%")
-        m3.metric("P(Swinging Strike)", f"{probs['swing_whiff'] * 100:.1f}%")
-        m4.metric("Attack zone", attack_zone)
-
-        r1, r2 = st.columns(2)
-        swing_yes = guess_swing == "Yes"
-        whiff_yes = guess_whiff == "Yes" if swing_yes else False
-        r1.markdown(
-            f"**Swing:** {guess_label(probs['swing'], swing_yes)} — "
-            f"model {'expects a swing' if probs['swing'] >= 0.5 else 'expects a take'} "
-            f"({probs['swing'] * 100:.0f}%)"
-        )
-        if swing_yes:
-            whiff_yes = guess_whiff == "Yes"
-            r2.markdown(
-                f"**Whiff:** {guess_label(probs['whiff_if_swing'], whiff_yes)} — "
-                f"{'high' if probs['whiff_if_swing'] >= 0.5 else 'low'} miss risk if he swings "
-                f"({probs['whiff_if_swing'] * 100:.0f}%)"
+        if custom_mode:
+            vert_value = (
+                st.session_state.lab_guess_vert
+                if plot_px is not None
+                else "Click the map"
             )
+            st.text_input("Vertical location", value=vert_value, disabled=True)
+            guess_vertical = st.session_state.lab_guess_vert if plot_px is not None else vert_value
         else:
-            r2.markdown("**Whiff:** — (you guessed take; whiff only applies on a swing)")
+            guess_vertical = st.selectbox("Vertical location", VERTICAL_OPTIONS, key="lab_guess_vert")
+    with g3:
+        if custom_mode:
+            horiz_value = (
+                st.session_state.lab_guess_horiz
+                if plot_px is not None
+                else "Click the map"
+            )
+            st.text_input("Horizontal location", value=horiz_value, disabled=True)
+            guess_horizontal = st.session_state.lab_guess_horiz if plot_px is not None else horiz_value
+        else:
+            guess_horizontal = st.selectbox("Horizontal location", HORIZONTAL_OPTIONS, key="lab_guess_horiz")
+    with g4:
+        guess_velocity = st.selectbox("Velocity intent", VELOCITY_INTENTS, index=1, key="lab_guess_velocity")
 
-        if probs["swing_whiff"] >= 0.35:
-            st.error(f"Ugly pitch profile — {probs['swing_whiff'] * 100:.0f}% swinging-strike probability.")
-        elif probs["swing"] < 0.25:
-            st.success("Take city — model barely expects a swing.")
-        else:
-            st.info("Competitive pitch — swing decision is genuinely close.")
+    st.button(
+        "Pitch It!",
+        type="primary",
+        key="lab_pitch_it",
+        use_container_width=True,
+        on_click=_commit_pitch,
+        args=(sz_bot, sz_top, platoon_bats),
+    )
+
+    if st.session_state.get("lab_need_map_click"):
+        st.warning("Custom pitch mode — click the zone map to select a location before pitching.")
+
+    plate_x = float(st.session_state.lab_px)
+    plate_z = float(st.session_state.lab_pz)
+    attack_zone = assign_attack_zone(plate_x, plate_z, sz_top, sz_bot)
+
+    pitch_type = PITCH_FAMILY_DEFAULT_CODE[guess_family]
+    speed_tier = VELOCITY_INTENT_TO_TIER[guess_velocity]
+    pitch_profile = apply_physics_tiers(
+        guess_family,
+        release_speed=speed_tier,
+        vertical_break="Average",
+        spin_rate="Average",
+        horizontal_break="Average",
+    )
+    lab_profile = profile_lookup.get(pitch_type, {})
+    if lab_profile:
+        for col in PITCH_METRIC_COLS:
+            if col in lab_profile and col not in pitch_profile:
+                pitch_profile[col] = float(lab_profile[col])
+
+    _render_strategy_feedback(
+        has_pitched=bool(st.session_state.get("lab_has_pitched")),
+        balls=balls,
+        strikes=strikes,
+        runners_on=runners_on,
+        guess_family=guess_family,
+        guess_vertical=guess_vertical if plot_px is not None or not custom_mode else "—",
+        guess_horizontal=guess_horizontal if plot_px is not None or not custom_mode else "—",
+        guess_velocity=guess_velocity,
+    )
+
+    if models_ready and st.session_state.get("lab_has_pitched"):
+        with st.expander("Model probabilities (optional)"):
+            row = build_pitch_row(
+                plate_x, plate_z, sz_bot, sz_top, balls, strikes, runners_on, pitch_type, pitch_profile
+            )
+            probs = predict_probs(swing_bundle, whiff_bundle, row)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("P(Swing)", f"{probs['swing'] * 100:.1f}%")
+            m2.metric("P(Whiff | Swing)", f"{probs['whiff_if_swing'] * 100:.1f}%")
+            m3.metric("P(Swinging Strike)", f"{probs['swing_whiff'] * 100:.1f}%")
+            st.caption(f"Thrown to {attack_zone} @ {plate_x:+.2f}/{plate_z:.2f} ft · {guess_family} ({guess_velocity})")
 
 
 def render_pitch_lab(qualified_df: pd.DataFrame, batter_stand: pd.DataFrame | None = None) -> None:

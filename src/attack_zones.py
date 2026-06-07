@@ -160,6 +160,25 @@ def matches_vertical(plate_z: float, vertical: str, sz_top: float, sz_bot: float
     return True
 
 
+def infer_vertical(plate_z: float, sz_top: float, sz_bot: float) -> str:
+    """Map plate_z to Low / Middle / High bucket (inverse of matches_vertical)."""
+    zone_h = sz_top - sz_bot
+    if plate_z <= sz_bot + 0.40 * zone_h:
+        return "Low"
+    if plate_z >= sz_bot + 0.60 * zone_h:
+        return "High"
+    return "Middle"
+
+
+def infer_horizontal(plate_x: float, bats: str) -> str:
+    """Map plate_x to Inside / Middle / Outside from hitter perspective."""
+    if abs(plate_x) <= 0.32:
+        return "Middle"
+    if bats == "L":
+        return "Inside" if plate_x >= 0.12 else "Outside"
+    return "Inside" if plate_x <= -0.12 else "Outside"
+
+
 def random_pitch_location(
     attack_zone: str,
     vertical: str,
