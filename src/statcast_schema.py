@@ -74,6 +74,7 @@ STATCAST_KEEP_COLS = [
     "release_spin_rate",
     "spin_axis",
     "release_extension",
+    "estimated_woba_using_speedangle",
 ]
 
 INT_COLS = [
@@ -101,6 +102,7 @@ FLOAT_COLS = [
     "release_spin_rate",
     "spin_axis",
     "release_extension",
+    "estimated_woba_using_speedangle",
 ]
 
 STRING_COLS = [

@@ -14,10 +14,14 @@ from src.model_viz import (
     build_calibration_figure,
     build_engineered_importance_figure,
     build_pred_grid_figure,
+    build_regression_scatter_figure,
     build_roc_figure,
 )
+from src.pitch_models import load_pitch_lab_models
 from src.pitch_simulator import render_whiff_lab
 from src.whiff_features import SEASON_END, SEASON_START
+
+load_pitch_lab_models()
 
 ROOT = Path(__file__).resolve().parent
 MODEL_DIR = ROOT / "data" / "model"
@@ -239,6 +243,22 @@ div[data-testid="stMetric"] {
     font-size: 0.92rem;
     line-height: 1.45;
 }
+.whiff-xwoba-box {
+    display: inline-block;
+    min-width: 120px;
+    padding: 14px 22px;
+    border-radius: 12px;
+    font-size: 2.1rem;
+    font-weight: 800;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: 0.04em;
+    color: #f8fafc;
+    text-align: center;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.whiff-xwoba-cold { background: #2563eb; }
+.whiff-xwoba-average { background: #64748b; color: #f8fafc; }
+.whiff-xwoba-hot { background: #dc2626; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -279,6 +299,27 @@ def load_swing_grid():
     if SWING_GRID_FILE.exists():
         return pd.read_parquet(SWING_GRID_FILE)
     return None
+
+
+def render_regression_panel(block: dict):
+    st.markdown(block["layman"]["what_it_outputs"])
+    if block.get("training_note"):
+        st.caption(block["training_note"])
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("MAE", f"{block['mae']:.3f}")
+    c2.metric("RMSE", f"{block['rmse']:.3f}")
+    c3.metric("R²", f"{block['r2']:.2f}")
+    c4.metric("Algorithm", block["selected_model"].replace("_", " ").title())
+
+    st.markdown(block["layman"]["mae"])
+    st.markdown(block["layman"]["r2"])
+
+    st.plotly_chart(build_regression_scatter_figure(block), use_container_width=True)
+    st.plotly_chart(build_engineered_importance_figure("xwoba"), use_container_width=True)
+    st.caption(
+        "Grouped by engineered categories. Target: Statcast estimated_woba_using_speedangle on hit_into_play rows."
+    )
 
 
 def render_model_panel(block, rate_label: str, model_key: str = "swing"):
@@ -348,7 +389,7 @@ def tab_model_refinement():
     st.header("Model Refinement")
     st.markdown(
         """
-        Read-only view of **pre-trained** swing and whiff models. This tab loads saved artifacts only —
+        Read-only view of **pre-trained** swing, whiff, and xwOBA-on-contact models. This tab loads saved artifacts only —
         no training runs in the app.
         """
     )
@@ -367,7 +408,7 @@ def tab_model_refinement():
         st.markdown(
             """
             **What training produces**
-            - `data/model/swing_model.joblib` / `whiff_model.joblib`
+            - `data/model/swing_model.joblib` / `whiff_model.joblib` / `xwoba_model.joblib`
             - `data/model/model_insights.json` — metrics, feature importance, example scenarios
             - Prediction grids and September holdout batter summaries
             """
@@ -381,9 +422,9 @@ def tab_model_refinement():
     st.markdown(
         f"""
         <div class="methodology-box">
-            <h4>Two-step pipeline + hitter personalization</h4>
+            <h4>Three-model pipeline + hitter personalization</h4>
             <p>{insights['layman']['validation']}</p>
-            <p>{insights['layman']['combined']}</p>
+            <p>{insights['layman'].get('pipeline', insights['layman']['combined'])}</p>
             <p><b>Hitter inputs:</b> Each batter's <b>in-zone swing %</b> and <b>O-zone swing %</b>
             (2025 Statcast) personalize swing decisions in the Whiff Lab. High in-zone swing %
             favors called-strike paths; high O-zone swing % opens chase-whiff paths.</p>
@@ -394,8 +435,8 @@ def tab_model_refinement():
         unsafe_allow_html=True,
     )
 
-    tab_swing, tab_whiff, tab_combo, tab_notes = st.tabs(
-        ["Model A — Swing", "Model B — Whiff", "Combined scenarios", "Refinement notes"]
+    tab_swing, tab_whiff, tab_xwoba, tab_combo, tab_notes = st.tabs(
+        ["Model A — Swing", "Model B — Whiff", "Model C — xwOBAcon", "Combined scenarios", "Refinement notes"]
     )
 
     with tab_swing:
@@ -452,8 +493,18 @@ def tab_model_refinement():
                 use_container_width=True,
             )
 
+    with tab_xwoba:
+        st.markdown("#### If he puts it in play, how much damage?")
+        if "xwoba" in insights:
+            render_regression_panel(insights["xwoba"])
+        else:
+            st.warning(
+                "No xwOBA model in saved insights. Re-pull Statcast with "
+                "`estimated_woba_using_speedangle`, then run `python notebooks/train_whiff_model.py`."
+            )
+
     with tab_combo:
-        st.markdown("#### Example pitches — both models together")
+        st.markdown("#### Example pitches — swing, whiff, and contact quality")
         examples = pd.DataFrame(insights.get("example_pitches", []))
         if examples.empty:
             st.caption("No example scenarios in insights file.")
@@ -468,8 +519,11 @@ def tab_model_refinement():
                     "swing_prob_pct",
                     "whiff_if_swing_pct",
                     "swing_whiff_pct",
+                    "contact_prob_pct",
+                    "xwoba_con",
                     "swing_takeaway",
                     "whiff_takeaway",
+                    "xwoba_takeaway",
                 ]
                 if c in examples.columns
             ]
@@ -483,14 +537,17 @@ def tab_model_refinement():
                         "swing_prob_pct": "P(swing) %",
                         "whiff_if_swing_pct": "P(whiff|swing) %",
                         "swing_whiff_pct": "P(swing & whiff) %",
+                        "contact_prob_pct": "P(contact) %",
+                        "xwoba_con": "xwOBAcon",
                         "swing_takeaway": "Swing takeaway",
                         "whiff_takeaway": "Whiff takeaway",
+                        "xwoba_takeaway": "Damage takeaway",
                     }
                 ),
                 use_container_width=True,
                 hide_index=True,
             )
-            st.caption("P(swing & whiff) = P(swing) × P(whiff | swing).")
+            st.caption("P(swing & whiff) = P(swing) × P(whiff | swing). xwOBAcon applies when P(contact) > 0.")
 
     with tab_notes:
         st.markdown(
@@ -500,6 +557,13 @@ def tab_model_refinement():
             - Regenerate EDA after feature changes: `python notebooks/exploratory_analysis.py`
             - Retrain models: `python notebooks/train_whiff_model.py`
             - Refresh Pitch Lab deploy bundles (included in train script)
+
+            **Three-model Whiff Lab**
+            - **Take %** = 1 − P(swing)
+            - **Whiff %** = P(swing) × P(whiff | swing)
+            - **Contact %** = P(swing) × (1 − P(whiff | swing))
+            - **xStrike %** = Take + Whiff in-zone; Whiff only out-of-zone
+            - **xwOBAcon** from Model C when contact path is open
 
             **Hitter personalization (Whiff Lab)**
             - **In-zone swing %** — share of swings on pitches inside the strike zone (Statcast `miss_dist_in ≤ 0`)

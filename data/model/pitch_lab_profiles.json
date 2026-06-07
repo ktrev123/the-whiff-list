@@ -4,52 +4,25 @@
   "pitch_types": {
     "CH": {
       "release_speed": 86.5,
-      "effective_speed": 86.6,
+      "speed_diff": 0.1,
       "pfx_x": -1.05,
       "pfx_z": 0.37,
       "release_spin_rate": 1801.0,
       "spin_axis": 232.0,
       "release_extension": 6.4
     },
-    "CS": {
-      "release_speed": 73.2,
-      "effective_speed": 72.5,
-      "pfx_x": 0.615,
-      "pfx_z": -0.51,
-      "release_spin_rate": 2477.5,
-      "spin_axis": 75.0,
-      "release_extension": 5.9
-    },
     "CU": {
       "release_speed": 79.9,
-      "effective_speed": 79.9,
+      "speed_diff": -0.1,
       "pfx_x": 0.55,
       "pfx_z": -0.87,
       "release_spin_rate": 2584.0,
       "spin_axis": 52.0,
       "release_extension": 6.4
     },
-    "EP": {
-      "release_speed": 51.65,
-      "effective_speed": 49.95,
-      "pfx_x": -0.31,
-      "pfx_z": 1.45,
-      "release_spin_rate": 1295.0,
-      "spin_axis": 212.0,
-      "release_extension": 4.45
-    },
-    "FA": {
-      "release_speed": 67.8,
-      "effective_speed": 65.6,
-      "pfx_x": -0.76,
-      "pfx_z": 1.26,
-      "release_spin_rate": 1720.0,
-      "spin_axis": 224.0,
-      "release_extension": 4.6
-    },
     "FC": {
       "release_speed": 89.7,
-      "effective_speed": 90.0,
+      "speed_diff": 0.3,
       "pfx_x": 0.11,
       "pfx_z": 0.69,
       "release_spin_rate": 2408.0,
@@ -58,25 +31,16 @@
     },
     "FF": {
       "release_speed": 94.6,
-      "effective_speed": 94.8,
+      "speed_diff": 0.2,
       "pfx_x": -0.49,
       "pfx_z": 1.34,
       "release_spin_rate": 2322.0,
       "spin_axis": 208.0,
       "release_extension": 6.5
     },
-    "FO": {
-      "release_speed": 83.0,
-      "effective_speed": 83.0,
-      "pfx_x": -0.74,
-      "pfx_z": 0.0,
-      "release_spin_rate": 1150.0,
-      "spin_axis": 253.0,
-      "release_extension": 6.4
-    },
     "FS": {
       "release_speed": 86.3,
-      "effective_speed": 86.7,
+      "speed_diff": 0.4,
       "pfx_x": -0.94,
       "pfx_z": 0.25,
       "release_spin_rate": 1382.0,
@@ -85,43 +49,16 @@
     },
     "KC": {
       "release_speed": 83.4,
-      "effective_speed": 83.3,
+      "speed_diff": 0.0,
       "pfx_x": 0.42,
       "pfx_z": -0.82,
       "release_spin_rate": 2511.0,
       "spin_axis": 41.0,
       "release_extension": 6.5
     },
-    "KN": {
-      "release_speed": 77.65,
-      "effective_speed": 77.45,
-      "pfx_x": -0.115,
-      "pfx_z": -0.1,
-      "release_spin_rate": 270.0,
-      "spin_axis": 35.5,
-      "release_extension": 6.5
-    },
-    "PO": {
-      "release_speed": 90.5,
-      "effective_speed": 90.0,
-      "pfx_x": -0.69,
-      "pfx_z": 1.22,
-      "release_spin_rate": 2264.0,
-      "spin_axis": 220.0,
-      "release_extension": 6.1
-    },
-    "SC": {
-      "release_speed": 85.6,
-      "effective_speed": 84.0,
-      "pfx_x": -0.71,
-      "pfx_z": -0.24,
-      "release_spin_rate": 1013.0,
-      "spin_axis": 275.0,
-      "release_extension": 5.7
-    },
     "SI": {
       "release_speed": 94.0,
-      "effective_speed": 94.0,
+      "speed_diff": 0.1,
       "pfx_x": -1.15,
       "pfx_z": 0.64,
       "release_spin_rate": 2188.0,
@@ -130,7 +67,7 @@
     },
     "SL": {
       "release_speed": 86.4,
-      "effective_speed": 86.7,
+      "speed_diff": 0.3,
       "pfx_x": 0.21,
       "pfx_z": 0.16,
       "release_spin_rate": 2431.0,
@@ -139,7 +76,7 @@
     },
     "ST": {
       "release_speed": 82.8,
-      "effective_speed": 82.7,
+      "speed_diff": -0.1,
       "pfx_x": 1.0,
       "pfx_z": 0.08,
       "release_spin_rate": 2601.0,
@@ -148,21 +85,12 @@
     },
     "SV": {
       "release_speed": 81.9,
-      "effective_speed": 81.2,
+      "speed_diff": -0.3,
       "pfx_x": 0.83,
       "pfx_z": -0.37,
       "release_spin_rate": 2486.0,
       "spin_axis": 56.0,
       "release_extension": 6.2
-    },
-    "UN": {
-      "release_speed": 75.6,
-      "effective_speed": 76.3,
-      "pfx_x": 0.18,
-      "pfx_z": 0.91,
-      "release_spin_rate": 2143.0,
-      "spin_axis": 156.0,
-      "release_extension": 6.65
     }
   }
 }

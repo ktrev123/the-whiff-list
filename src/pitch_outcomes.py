@@ -167,4 +167,62 @@ def enrich_probs_dict(probs: dict[str, Any]) -> dict[str, Any]:
         probs["whiff_if_swing"],
         in_zone=in_zone,
     )
-    return {**probs, **decomposed}
+    outcome = decompose_swing_outcomes(probs["swing"], probs["whiff_if_swing"], in_zone=in_zone)
+    return {**probs, **decomposed, **outcome}
+
+
+def decompose_swing_outcomes(
+    p_swing: float,
+    p_whiff_if_swing: float,
+    *,
+    in_zone: bool,
+) -> dict[str, float]:
+    p_swing = float(np.clip(p_swing, 0.0, 1.0))
+    p_whiff = float(np.clip(p_whiff_if_swing, 0.0, 1.0))
+    p_take = 1.0 - p_swing
+    p_whiff_total = p_swing * p_whiff
+    p_contact = p_swing * (1.0 - p_whiff)
+    return {
+        "p_take": p_take,
+        "p_whiff": p_whiff_total,
+        "p_contact": p_contact,
+        "xstrike": expected_strike_prob(p_take, p_whiff_total, in_zone=in_zone),
+    }
+
+
+def expected_strike_prob(p_take: float, p_whiff: float, *, in_zone: bool) -> float:
+    if in_zone:
+        return float(np.clip(p_take + p_whiff, 0.0, 1.0))
+    return float(np.clip(p_whiff, 0.0, 1.0))
+
+
+LEAGUE_XWOBA_CON = 0.320
+
+
+def mock_xwoba_con(
+    *,
+    pitch_family: str = "Fastball",
+    in_zone: bool = True,
+    attack_zone: str = "Heart",
+) -> float:
+    base = {"Fastball": 0.340, "Breaking": 0.295, "Offspeed": 0.305}.get(pitch_family, LEAGUE_XWOBA_CON)
+    if not in_zone:
+        base *= 0.88
+    if attack_zone == "Heart":
+        base *= 1.08
+    elif attack_zone == "Shadow":
+        base *= 0.96
+    return float(np.clip(base, 0.150, 0.550))
+
+
+def format_xwoba_display(value: float) -> str:
+    text = f"{float(value):.3f}"
+    return text[1:] if text.startswith("0") else text
+
+
+def xwoba_damage_tier(value: float) -> tuple[str, str, str]:
+    if value < 0.280:
+        return "cold", "Cold — weak contact", "#2563eb"
+    if value <= 0.340:
+        return "average", "Average contact", "#ca8a04"
+    return "hot", "Hot — high damage risk", "#dc2626"

@@ -26,7 +26,7 @@ from src.statcast_schema import (
 DATA_DIR = ROOT / "data"
 RAW_DIR = DATA_DIR / "raw_parquet"
 OUTPUT_FILE = DATA_DIR / "statcast_2025.parquet"
-CACHE_SCHEMA_VERSION = 3  # bump when columns or season filters change
+CACHE_SCHEMA_VERSION = 4  # bump when columns or season filters change
 
 
 def normalize_dtypes(df: pd.DataFrame) -> pd.DataFrame:

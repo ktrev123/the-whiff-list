@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+import pandas as pd
 import plotly.graph_objects as go
-
 from src.attack_zones import _fallback_location, assign_attack_zone, boundary_signed_inches
 from src.pitch_outcomes import (
+    decompose_swing_outcomes,
     format_outcome_probs,
     is_in_zone,
     mock_pitch_probs,
+    mock_xwoba_con,
     prob_favorable_decomposed,
 )
 
@@ -217,9 +219,13 @@ def _recommendation_score(
     candidate: dict[str, Any],
     hitter_rates: dict[str, float] | None,
 ) -> float:
-    return _weighted_favorable_score(balls, strikes, candidate, hitter_rates) + _strategy_adjustment(
-        balls, strikes, runners_on, candidate, hitter_rates
-    )
+    xstrike = float(candidate.get("xstrike", candidate.get("p_favorable", 0.0)))
+    xwoba = candidate.get("xwoba_con")
+    if xwoba is not None:
+        base = xstrike - float(xwoba)
+    else:
+        base = _weighted_favorable_score(balls, strikes, candidate, hitter_rates)
+    return base + _strategy_adjustment(balls, strikes, runners_on, candidate, hitter_rates) * 0.35
 
 
 def _build_rationale(
@@ -329,6 +335,11 @@ def _score_candidate(
         probs = predict_fn(plate_x=px, plate_z=pz, pitch_family=pitch_family, velocity_intent=velocity_intent, **predict_kwargs)
         p_swing = probs["swing"]
         p_whiff = probs["whiff_if_swing"]
+        extra = {
+            k: probs[k]
+            for k in ("p_take", "p_whiff", "p_contact", "xstrike", "xwoba_con")
+            if k in probs
+        }
     else:
         p_swing, p_whiff = _mock_probs_for_spot(
             balls=balls,
@@ -341,8 +352,20 @@ def _score_candidate(
             velocity_intent=velocity_intent,
             predict_kwargs=predict_kwargs,
         )
+        extra = {}
 
     decomposed = prob_favorable_decomposed(p_swing, p_whiff, in_zone=in_zone)
+    swing_out = decompose_swing_outcomes(p_swing, p_whiff, in_zone=in_zone)
+    if "xstrike" not in extra:
+        extra = swing_out
+    else:
+        extra = {**swing_out, **extra}
+    if extra.get("xwoba_con") is None and extra.get("p_contact", 0) > 0:
+        extra["xwoba_con"] = mock_xwoba_con(
+            pitch_family=pitch_family,
+            in_zone=in_zone,
+            attack_zone=assign_attack_zone(px, pz, sz_top, sz_bot),
+        )
     return {
         "pitch_family": pitch_family,
         "vertical": vertical,
@@ -353,6 +376,7 @@ def _score_candidate(
         "attack_zone": assign_attack_zone(px, pz, sz_top, sz_bot),
         "in_zone": in_zone,
         **decomposed,
+        **extra,
     }
 
 
@@ -366,55 +390,115 @@ def recommend_best_pitch(
     bats: str = "R",
     predict_fn: Callable[..., dict[str, float]] | None = None,
     predict_kwargs: dict[str, Any] | None = None,
+    swing_bundle: dict | None = None,
+    whiff_bundle: dict | None = None,
+    xwoba_bundle: dict | None = None,
+    profile_lookup: dict[str, Any] | None = None,
+    use_ml: bool = True,
 ) -> dict[str, Any]:
-    """Search pitch-family × location × velocity grid; return highest P(favorable)."""
+    """Search 27 family × location combos; return highest recommendation score."""
+    from src.pitch_batch_predict import (
+        batch_predict_outcomes_ml,
+        batch_predict_outcomes_mock,
+        build_recommendation_grid_df,
+    )
+
     predict_kwargs = predict_kwargs or {}
     hitter_rates = predict_kwargs.get("hitter_rates")
-    candidates: list[dict[str, Any]] = []
-
-    for family in PITCH_FAMILIES:
-        for vertical in VERTICAL_OPTIONS:
-            for horizontal in HORIZONTAL_OPTIONS:
-                for velocity in VELOCITY_INTENTS:
-                    candidates.append(
-                        _score_candidate(
-                            balls=balls,
-                            strikes=strikes,
-                            pitch_family=family,
-                            vertical=vertical,
-                            horizontal=horizontal,
-                            velocity_intent=velocity,
-                            sz_top=sz_top,
-                            sz_bot=sz_bot,
-                            bats=bats,
-                            predict_fn=predict_fn,
-                            predict_kwargs=predict_kwargs,
-                        )
-                    )
-
-    best = max(
-        candidates,
-        key=lambda c: _recommendation_score(balls, strikes, runners_on, c, hitter_rates),
+    swing_medians = pd.Series(
+        (swing_bundle or {}).get("pitch_medians", {})
     )
+
+    grid = build_recommendation_grid_df(
+        balls=balls,
+        strikes=strikes,
+        runners_on=runners_on,
+        sz_top=sz_top,
+        sz_bot=sz_bot,
+        bats=bats,
+        profile_lookup=profile_lookup or {},
+        swing_medians=swing_medians,
+    )
+
+    if use_ml and swing_bundle is not None and whiff_bundle is not None and predict_fn is None:
+        scored = batch_predict_outcomes_ml(swing_bundle, whiff_bundle, xwoba_bundle, grid)
+    elif predict_fn is not None:
+        scored = _score_grid_with_predict_fn(
+            grid,
+            balls=balls,
+            strikes=strikes,
+            predict_fn=predict_fn,
+            predict_kwargs=predict_kwargs,
+        )
+    else:
+        scored = batch_predict_outcomes_mock(
+            grid,
+            balls=balls,
+            strikes=strikes,
+            hitter_rates=hitter_rates,
+        )
+
+    scored["recommendation_score"] = scored.apply(
+        lambda row: _recommendation_score(
+            balls, strikes, runners_on, row.to_dict(), hitter_rates
+        ),
+        axis=1,
+    )
+    best = scored.loc[scored["recommendation_score"].idxmax()]
     count = f"{balls}-{strikes}"
+    best_dict = best.to_dict()
     rationale = _build_rationale(
         balls=balls,
         strikes=strikes,
         runners_on=runners_on,
-        best=best,
+        best=best_dict,
         hitter_rates=hitter_rates,
     )
-
-    headline = f"Recommended Pitch: {best['pitch_family']} — {best['horizontal']} / {best['vertical']}"
+    headline = (
+        f"Recommended Pitch: {best_dict['pitch_family']} — "
+        f"{best_dict['horizontal']} / {best_dict['vertical']}"
+    )
 
     return {
-        **best,
+        **best_dict,
         "count": count,
         "headline": headline,
         "rationale": rationale,
-        "confidence": "Count + hitter-aware grid search",
-        "outcome_summary": format_outcome_probs(best),
+        "confidence": "xStrike ↑ · xwOBAcon ↓ · count + hitter aware",
+        "outcome_summary": format_outcome_probs(best_dict),
     }
+
+
+def _score_grid_with_predict_fn(
+    grid: pd.DataFrame,
+    *,
+    balls: int,
+    strikes: int,
+    predict_fn: Callable[..., dict[str, float]],
+    predict_kwargs: dict[str, Any],
+) -> pd.DataFrame:
+    """Legacy row-wise path when a custom predict_fn is supplied."""
+    rows: list[dict[str, Any]] = []
+    for row in grid.itertuples(index=False):
+        probs = predict_fn(
+            plate_x=row.plate_x,
+            plate_z=row.plate_z,
+            pitch_family=row.pitch_family,
+            velocity_intent=row.velocity_intent,
+            **predict_kwargs,
+        )
+        in_zone = bool(row.in_zone)
+        decomposed = prob_favorable_decomposed(
+            probs["swing"], probs["whiff_if_swing"], in_zone=in_zone
+        )
+        swing_out = decompose_swing_outcomes(
+            probs["swing"], probs["whiff_if_swing"], in_zone=in_zone
+        )
+        merged = {**row._asdict(), **decomposed, **swing_out}
+        if probs.get("xwoba_con") is not None:
+            merged["xwoba_con"] = probs["xwoba_con"]
+        rows.append(merged)
+    return pd.DataFrame(rows)
 
 
 def score_thrown_pitch(
@@ -429,10 +513,40 @@ def score_thrown_pitch(
     sz_bot: float,
     predict_fn: Callable[..., dict[str, float]] | None = None,
     predict_kwargs: dict[str, Any] | None = None,
+    swing_bundle: dict | None = None,
+    whiff_bundle: dict | None = None,
+    xwoba_bundle: dict | None = None,
+    profile_lookup: dict[str, Any] | None = None,
+    use_ml: bool = True,
 ) -> dict[str, Any]:
     """Score the actual pitch location the user threw."""
+    from src.pitch_batch_predict import (
+        batch_predict_outcomes_ml,
+        batch_predict_outcomes_mock,
+        build_thrown_pitch_df,
+    )
+
     predict_kwargs = predict_kwargs or {}
+    hitter_rates = predict_kwargs.get("hitter_rates")
     in_zone = is_in_zone(plate_x, plate_z, sz_bot, sz_top)
+    swing_medians = pd.Series((swing_bundle or {}).get("pitch_medians", {}))
+
+    if use_ml and swing_bundle is not None and whiff_bundle is not None and predict_fn is None:
+        thrown_df = build_thrown_pitch_df(
+            balls=balls,
+            strikes=strikes,
+            runners_on=int(predict_kwargs.get("runners_on", 0)),
+            plate_x=plate_x,
+            plate_z=plate_z,
+            pitch_family=pitch_family,
+            velocity_intent=velocity_intent,
+            sz_top=sz_top,
+            sz_bot=sz_bot,
+            profile_lookup=profile_lookup or {},
+            swing_medians=swing_medians,
+        )
+        scored = batch_predict_outcomes_ml(swing_bundle, whiff_bundle, xwoba_bundle, thrown_df)
+        return scored.iloc[0].to_dict()
 
     if predict_fn is not None:
         probs = predict_fn(
@@ -442,30 +556,39 @@ def score_thrown_pitch(
             velocity_intent=velocity_intent,
             **predict_kwargs,
         )
-        p_swing, p_whiff = probs["swing"], probs["whiff_if_swing"]
-    else:
-        p_swing, p_whiff = _mock_probs_for_spot(
-            balls=balls,
-            strikes=strikes,
-            plate_x=plate_x,
-            plate_z=plate_z,
-            sz_top=sz_top,
-            sz_bot=sz_bot,
-            pitch_family=pitch_family,
-            velocity_intent=velocity_intent,
-            predict_kwargs=predict_kwargs,
-        )
+        return {
+            "plate_x": plate_x,
+            "plate_z": plate_z,
+            "pitch_family": pitch_family,
+            "velocity_intent": velocity_intent,
+            "attack_zone": assign_attack_zone(plate_x, plate_z, sz_top, sz_bot),
+            "in_zone": in_zone,
+            **probs,
+        }
 
-    decomposed = prob_favorable_decomposed(p_swing, p_whiff, in_zone=in_zone)
-    return {
-        "plate_x": plate_x,
-        "plate_z": plate_z,
-        "pitch_family": pitch_family,
-        "velocity_intent": velocity_intent,
-        "attack_zone": assign_attack_zone(plate_x, plate_z, sz_top, sz_bot),
-        "in_zone": in_zone,
-        **decomposed,
-    }
+    thrown_df = build_thrown_pitch_df(
+        balls=balls,
+        strikes=strikes,
+        runners_on=int(predict_kwargs.get("runners_on", 0)),
+        plate_x=plate_x,
+        plate_z=plate_z,
+        pitch_family=pitch_family,
+        velocity_intent=velocity_intent,
+        sz_top=sz_top,
+        sz_bot=sz_bot,
+        profile_lookup=profile_lookup or {},
+        swing_medians=swing_medians,
+    )
+    scored = batch_predict_outcomes_mock(
+        thrown_df,
+        balls=balls,
+        strikes=strikes,
+        hitter_rates=hitter_rates,
+    )
+    row = scored.iloc[0].to_dict()
+    row["vertical"] = predict_kwargs.get("vertical")
+    row["horizontal"] = predict_kwargs.get("horizontal")
+    return row
 
 
 def compare_strategy_guess(

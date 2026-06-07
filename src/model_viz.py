@@ -140,9 +140,25 @@ ENGINEERED_WHIFF_IMPORTANCE = [
 ]
 
 
+ENGINEERED_XWOBA_IMPORTANCE = [
+    {"label": "Release speed", "importance": 0.22},
+    {"label": "Vertical location", "importance": 0.18},
+    {"label": "Horizontal location", "importance": 0.16},
+    {"label": "Vertical break", "importance": 0.12},
+    {"label": "Horizontal break", "importance": 0.10},
+    {"label": "Pitch category", "importance": 0.09},
+    {"label": "Count leverage", "importance": 0.08},
+    {"label": "Spin rate", "importance": 0.05},
+]
+
+
 def build_engineered_importance_figure(model_key: str) -> go.Figure:
-    """Display importance grouped by engineered categories (matches EDA dashboard)."""
-    rows = ENGINEERED_WHIFF_IMPORTANCE if model_key == "whiff" else ENGINEERED_SWING_IMPORTANCE
+    if model_key == "whiff":
+        rows = ENGINEERED_WHIFF_IMPORTANCE
+    elif model_key == "xwoba":
+        rows = ENGINEERED_XWOBA_IMPORTANCE
+    else:
+        rows = ENGINEERED_SWING_IMPORTANCE
     labels = [row["label"] for row in rows][::-1]
     values = [row["importance"] for row in rows][::-1]
     fig = go.Figure(go.Bar(x=values, y=labels, orientation="h", marker_color="#d4a937"))
@@ -154,6 +170,45 @@ def build_engineered_importance_figure(model_key: str) -> go.Figure:
         xaxis_title="Relative importance",
         height=340,
         margin=dict(l=10, r=10, t=40, b=10),
+    )
+    return fig
+
+
+def build_regression_scatter_figure(block: dict) -> go.Figure:
+    scatter = block.get("residual_scatter", {})
+    actual = scatter.get("actual", [])
+    predicted = scatter.get("predicted", [])
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=actual,
+            y=predicted,
+            mode="markers",
+            marker=dict(size=7, color="#20908d", opacity=0.55),
+            name="Held-out contact",
+        )
+    )
+    if actual and predicted:
+        lo = min(min(actual), min(predicted))
+        hi = max(max(actual), max(predicted))
+        fig.add_trace(
+            go.Scatter(
+                x=[lo, hi],
+                y=[lo, hi],
+                mode="lines",
+                line=dict(color="#cbbfa8", dash="dash"),
+                name="Perfect prediction",
+            )
+        )
+    fig.update_layout(
+        title="Actual vs. predicted xwOBAcon (sample)",
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis_title="Actual xwOBAcon",
+        yaxis_title="Predicted xwOBAcon",
+        height=360,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
     return fig
 
@@ -192,9 +247,16 @@ def build_pred_grid_figure(grid_df: pd.DataFrame, prob_col: str, title: str, col
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(range=[-2.5, 2.5], title="Horizontal (ft)", scaleanchor="y", scaleratio=1),
-        yaxis=dict(range=[0.5, 4.5], title="Vertical (ft)"),
-        height=440,
+        xaxis=dict(
+            range=[-2.5, 2.5],
+            title="Horizontal (ft)",
+            scaleanchor="y",
+            scaleratio=1,
+            constrain="domain",
+        ),
+        yaxis=dict(range=[0.5, 4.5], title="Vertical (ft)", constrain="domain"),
+        height=480,
+        width=480,
     )
     return fig
 
@@ -266,9 +328,31 @@ def _metrics_html(block: dict, rate_label: str) -> str:
     """
 
 
+def _regression_metrics_html(block: dict) -> str:
+    note = f"<p><em>{block['training_note']}</em></p>" if block.get("training_note") else ""
+    return f"""
+    <div class="box">
+      <p>{block['layman']['what_it_outputs']}</p>
+      {note}
+      <div class="metric-row">
+        <div class="metric"><span>MAE</span><b>{block['mae']:.3f}</b></div>
+        <div class="metric"><span>RMSE</span><b>{block['rmse']:.3f}</b></div>
+        <div class="metric"><span>R²</span><b>{block['r2']:.2f}</b></div>
+        <div class="metric"><span>Algorithm</span><b>{block['selected_model'].replace('_', ' ').title()}</b></div>
+      </div>
+      <p>{block['layman']['mae'].replace('**', '')}</p>
+      <p>{block['layman']['r2'].replace('**', '')}</p>
+    </div>
+    """
+
+
 def _examples_table_html(examples: list[dict]) -> str:
+    has_xwoba = any("xwoba_con" in ex for ex in examples)
     rows = ""
     for ex in examples:
+        xwoba_cell = f"<td>{ex.get('xwoba_con', '—')}</td>" if has_xwoba else ""
+        contact_cell = f"<td>{ex.get('contact_prob_pct', '—')}%</td>"
+        xwoba_takeaway = f"<td>{ex.get('xwoba_takeaway', '—')}</td>" if has_xwoba else ""
         rows += f"""
         <tr>
           <td>{ex['label']}</td>
@@ -277,18 +361,25 @@ def _examples_table_html(examples: list[dict]) -> str:
           <td>{ex['runners_on']}</td>
           <td>{ex['swing_prob_pct']}%</td>
           <td>{ex['whiff_if_swing_pct']}%</td>
+          {contact_cell}
           <td>{ex['swing_whiff_pct']}%</td>
+          {xwoba_cell}
           <td>{ex['swing_takeaway']}</td>
           <td>{ex['whiff_takeaway']}</td>
+          {xwoba_takeaway}
         </tr>
         """
+    xwoba_header = "<th>xwOBAcon</th>" if has_xwoba else ""
+    xwoba_takeaway_header = "<th>Damage takeaway</th>" if has_xwoba else ""
     return f"""
     <table>
       <thead>
         <tr>
           <th>Scenario</th><th>Pitch</th><th>Count</th><th>Runners</th>
-          <th>P(swing)</th><th>P(whiff|swing)</th><th>P(swing &amp; whiff)</th>
+          <th>P(swing)</th><th>P(whiff|swing)</th><th>P(contact)</th><th>P(swing &amp; whiff)</th>
+          {xwoba_header}
           <th>Swing takeaway</th><th>Whiff takeaway</th>
+          {xwoba_takeaway_header}
         </tr>
       </thead>
       <tbody>{rows}</tbody>
@@ -376,6 +467,19 @@ def export_training_report(
 
         for i, fig in enumerate(figs):
             chart_path = charts_dir / f"{target_key}_{i}.html"
+            fig.write_html(chart_path, include_plotlyjs=PLOTLY_JS)
+            sections.append(f'<div class="chart">{_fig_html(fig)}</div>')
+
+    if "xwoba" in insights:
+        xwoba = insights["xwoba"]
+        sections.append("<h2>Model C — xwOBA on contact</h2>")
+        sections.append(_regression_metrics_html(xwoba))
+        xwoba_figs = [
+            build_regression_scatter_figure(xwoba),
+            build_engineered_importance_figure("xwoba"),
+        ]
+        for i, fig in enumerate(xwoba_figs):
+            chart_path = charts_dir / f"xwoba_{i}.html"
             fig.write_html(chart_path, include_plotlyjs=PLOTLY_JS)
             sections.append(f'<div class="chart">{_fig_html(fig)}</div>')
 

@@ -9,9 +9,9 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import log_loss, roc_auc_score, roc_curve
+from sklearn.metrics import log_loss, mean_absolute_error, mean_squared_error, r2_score, roc_auc_score, roc_curve
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -23,12 +23,17 @@ from src.model_insights import (
     combined_output_summary,
     friendly_feature_name,
     interpret_log_loss,
+    interpret_mae,
+    interpret_r2,
     interpret_roc_auc,
     interpret_swing_probability_plain,
     interpret_whiff_probability_plain,
+    interpret_xwoba_damage,
     swing_output_summary,
+    three_model_pipeline_summary,
     validation_summary,
     whiff_output_summary,
+    xwoba_output_summary,
 )
 from src.model_viz import export_training_report
 from src.whiff_features import (
@@ -51,6 +56,7 @@ LEADERBOARD_FILE = ROOT / "data" / "whiff_leaderboard_2025.csv"
 MODEL_DIR = ROOT / "data" / "model"
 SWING_MODEL_FILE = MODEL_DIR / "swing_model.joblib"
 WHIFF_MODEL_FILE = MODEL_DIR / "whiff_model.joblib"
+XWOBA_MODEL_FILE = MODEL_DIR / "xwoba_model.joblib"
 METRICS_FILE = MODEL_DIR / "model_metrics.json"
 INSIGHTS_FILE = MODEL_DIR / "model_insights.json"
 BATTER_PRED_FILE = MODEL_DIR / "batter_predictions.csv"
@@ -59,6 +65,7 @@ SWING_GRID_FILE = MODEL_DIR / "league_swing_grid.parquet"
 WHIFF_GRID_FILE = MODEL_DIR / "league_whiff_grid.parquet"
 PITCH_LAB_SWING_FILE = MODEL_DIR / "pitch_lab_swing.joblib"
 PITCH_LAB_WHIFF_FILE = MODEL_DIR / "pitch_lab_whiff.joblib"
+PITCH_LAB_XWOBA_FILE = MODEL_DIR / "pitch_lab_xwoba.joblib"
 PITCH_LAB_PROFILES_FILE = MODEL_DIR / "pitch_lab_profiles.json"
 PITCH_LAB_ZONES_FILE = MODEL_DIR / "pitch_lab_hitter_zones.csv"
 PITCH_LAB_RATES_FILE = MODEL_DIR / "pitch_lab_hitter_rates.csv"
@@ -72,6 +79,144 @@ TEST_START = "September 2025"
 def load_qualified_batters():
     lb = pd.read_csv(LEADERBOARD_FILE)
     return lb.loc[lb["ab"] >= MIN_ABS, "batter"].astype(int).tolist()
+
+
+def filter_contact_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    contact = frame.loc[frame["description"] == "hit_into_play"].copy()
+    if "estimated_woba_using_speedangle" not in contact.columns:
+        return contact.iloc[0:0].copy()
+    return contact.dropna(subset=["estimated_woba_using_speedangle"]).copy()
+
+
+def build_regressors():
+    preprocessor = build_preprocessor()
+    return {
+        "random_forest": Pipeline(
+            [
+                ("prep", preprocessor),
+                (
+                    "reg",
+                    RandomForestRegressor(
+                        n_estimators=200,
+                        max_depth=12,
+                        min_samples_leaf=50,
+                        random_state=42,
+                        n_jobs=-1,
+                    ),
+                ),
+            ]
+        ),
+    }
+
+
+def regression_feature_importance(model, model_name: str) -> dict[str, float]:
+    names = encoded_feature_names(model)
+    if model_name == "random_forest":
+        values = model.named_steps["reg"].feature_importances_
+    else:
+        values = np.abs(model.named_steps["reg"].coef_)
+    ranked = sorted(zip(names, values), key=lambda x: x[1], reverse=True)
+    out = {}
+    for name, val in ranked:
+        label = friendly_feature_name(name)
+        if "effective velocity" in label.lower() or "effective_speed" in name.lower():
+            continue
+        out[label] = round(float(val), 4)
+    return out
+
+
+def fit_xwoba_regressor(x_train, y_train):
+    preprocessor = build_preprocessor()
+    model = Pipeline(
+        [
+            ("prep", preprocessor),
+            (
+                "reg",
+                RandomForestRegressor(
+                    n_estimators=200,
+                    max_depth=12,
+                    min_samples_leaf=50,
+                    random_state=42,
+                    n_jobs=-1,
+                ),
+            ),
+        ]
+    )
+    model.fit(x_train, y_train)
+    return model
+
+
+def train_best_regressor(x_train, y_train, x_test, y_test):
+    results = {}
+    best_name = None
+    best_r2 = -1.0
+    best_model = None
+    best_preds = None
+
+    for name, model in build_regressors().items():
+        model.fit(x_train, y_train)
+        preds = model.predict(x_test)
+        mae = mean_absolute_error(y_test, preds)
+        rmse = float(np.sqrt(mean_squared_error(y_test, preds)))
+        r2 = r2_score(y_test, preds)
+        results[name] = {
+            "mae": round(float(mae), 4),
+            "rmse": round(rmse, 4),
+            "r2": round(float(r2), 4),
+            "feature_importance": regression_feature_importance(model, name),
+        }
+        print(f"  {name}: MAE={mae:.4f}, RMSE={rmse:.4f}, R²={r2:.4f}")
+        if r2 > best_r2:
+            best_r2 = r2
+            best_name = name
+            best_model = model
+            best_preds = preds
+
+    return best_name, best_model, results, best_preds
+
+
+def build_regression_insights(
+    target_key: str,
+    outcome_label: str,
+    what_it_outputs: str,
+    best_name: str,
+    results: dict,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    y_test: pd.Series,
+    preds: np.ndarray,
+) -> dict:
+    mae = results[best_name]["mae"]
+    rmse = results[best_name]["rmse"]
+    r2 = results[best_name]["r2"]
+    importance = results[best_name]["feature_importance"]
+    actual = y_test.to_numpy(dtype=float)
+    pred = preds.astype(float)
+
+    return {
+        "target": target_key,
+        "outcome_label": outcome_label,
+        "selected_model": best_name,
+        "n_train_pitches": int(len(train_df)),
+        "n_test_pitches": int(len(test_df)),
+        "test_mean_target": round(float(y_test.mean()), 4),
+        "mae": mae,
+        "rmse": rmse,
+        "r2": r2,
+        "layman": {
+            "what_it_outputs": what_it_outputs,
+            "mae": interpret_mae(mae),
+            "r2": interpret_r2(r2),
+        },
+        "feature_importance": [
+            {"feature": feat, "label": feat, "importance": float(val)}
+            for feat, val in importance.items()
+        ],
+        "residual_scatter": {
+            "actual": [round(float(x), 4) for x in actual[:500]],
+            "predicted": [round(float(x), 4) for x in pred[:500]],
+        },
+    }
 
 
 def build_preprocessor():
@@ -211,7 +356,7 @@ def fit_logistic_model(x_train, y_train):
     return model
 
 
-def export_pitch_lab_artifacts(train_df, train_swings, pitch_medians, qualified):
+def export_pitch_lab_artifacts(train_df, train_swings, train_contact, pitch_medians, qualified):
     swing_lr = fit_logistic_model(train_df[MODEL_INPUT_COLS], train_df["is_swing"])
     whiff_lr = fit_logistic_model(
         train_swings[MODEL_INPUT_COLS],
@@ -231,6 +376,19 @@ def export_pitch_lab_artifacts(train_df, train_swings, pitch_medians, qualified)
         pitch_medians,
         PITCH_LAB_WHIFF_FILE,
     )
+
+    if len(train_contact) >= 500:
+        xwoba_rf = fit_xwoba_regressor(
+            train_contact[MODEL_INPUT_COLS],
+            train_contact["estimated_woba_using_speedangle"],
+        )
+        export_pitch_lab_bundle(
+            xwoba_rf,
+            "random_forest",
+            "estimated_woba_using_speedangle",
+            pitch_medians,
+            PITCH_LAB_XWOBA_FILE,
+        )
 
     profiles = (
         train_df.groupby("pitch_type", as_index=False)[PITCH_METRIC_COLS]
@@ -345,7 +503,7 @@ def build_model_insights(
     }
 
 
-def build_example_scenarios(swing_model, whiff_model, train_df, medians) -> list[dict]:
+def build_example_scenarios(swing_model, whiff_model, xwoba_model, train_df, medians) -> list[dict]:
     avg_bot = float(train_df["sz_bot"].mean())
     avg_top = float(train_df["sz_top"].mean())
     rows = []
@@ -373,10 +531,16 @@ def build_example_scenarios(swing_model, whiff_model, train_df, medians) -> list
     frame = apply_pitch_imputation(engineer_features(pd.DataFrame(rows)), medians)
     swing_probs = swing_model.predict_proba(frame[MODEL_INPUT_COLS])[:, 1]
     whiff_probs = whiff_model.predict_proba(frame[MODEL_INPUT_COLS])[:, 1]
+    xwoba_preds = (
+        xwoba_model.predict(frame[MODEL_INPUT_COLS])
+        if xwoba_model is not None
+        else np.full(len(frame), 0.320)
+    )
 
     examples = []
-    for scenario, p_swing, p_whiff in zip(EXAMPLE_SCENARIOS, swing_probs, whiff_probs):
+    for scenario, p_swing, p_whiff, xwoba in zip(EXAMPLE_SCENARIOS, swing_probs, whiff_probs, xwoba_preds):
         p_combined = float(p_swing * p_whiff)
+        p_contact = float(p_swing * (1 - p_whiff))
         examples.append(
             {
                 "label": scenario["label"],
@@ -385,7 +549,10 @@ def build_example_scenarios(swing_model, whiff_model, train_df, medians) -> list
                 "runners_on": scenario["runners_on"],
                 "swing_prob_pct": round(float(p_swing) * 100, 1),
                 "whiff_if_swing_pct": round(float(p_whiff) * 100, 1),
+                "contact_prob_pct": round(p_contact * 100, 1),
                 "swing_whiff_pct": round(p_combined * 100, 1),
+                "xwoba_con": round(float(xwoba), 3),
+                "xwoba_takeaway": interpret_xwoba_damage(float(xwoba)),
                 "swing_takeaway": interpret_swing_probability_plain(float(p_swing)),
                 "whiff_takeaway": interpret_whiff_probability_plain(float(p_whiff)),
             }
@@ -420,6 +587,10 @@ def main():
 
     train_swings = train_df[train_df["is_swing"] == 1].copy()
     test_swings = test_df[test_df["is_swing"] == 1].copy()
+    train_contact = filter_contact_frame(train_df)
+    test_contact = filter_contact_frame(test_df)
+    train_contact = apply_pitch_imputation(train_contact, pitch_medians)
+    test_contact = apply_pitch_imputation(test_contact, pitch_medians)
 
     print(f"Features: {MODEL_INPUT_COLS}")
 
@@ -429,6 +600,13 @@ def main():
         f"Whiff rate (if swung) — train: {train_swings['is_whiff'].mean():.3%} | "
         f"test: {test_swings['is_whiff'].mean():.3%}"
     )
+    if len(train_contact):
+        print(
+            f"xwOBAcon (contact) — train: {len(train_contact):,} | test: {len(test_contact):,} | "
+            f"mean train xwOBA: {train_contact['estimated_woba_using_speedangle'].mean():.3f}"
+        )
+    else:
+        print("xwOBAcon — skipped (re-pull Statcast with estimated_woba_using_speedangle)")
 
     print("\n=== Model A: Swing (all pitches) ===")
     swing_name, swing_model, swing_results, swing_probs = train_best_model(
@@ -445,6 +623,33 @@ def main():
         test_swings[MODEL_INPUT_COLS],
         test_swings["is_whiff"],
     )
+
+    xwoba_name = None
+    xwoba_model = None
+    xwoba_results = {}
+    xwoba_preds = None
+    xwoba_insights = None
+
+    if len(train_contact) >= 500 and len(test_contact) >= 100:
+        print("\n=== Model C: xwOBA on contact (balls in play) ===")
+        xwoba_name, xwoba_model, xwoba_results, xwoba_preds = train_best_regressor(
+            train_contact[MODEL_INPUT_COLS],
+            train_contact["estimated_woba_using_speedangle"],
+            test_contact[MODEL_INPUT_COLS],
+            test_contact["estimated_woba_using_speedangle"],
+        )
+        xwoba_insights = build_regression_insights(
+            "xwoba",
+            "xwOBAcon",
+            xwoba_output_summary(),
+            xwoba_name,
+            xwoba_results,
+            train_contact,
+            test_contact,
+            test_contact["estimated_woba_using_speedangle"],
+            xwoba_preds,
+        )
+        xwoba_insights["training_note"] = "Trained only on hit_into_play rows with non-null estimated_woba_using_speedangle."
 
     joblib.dump(
         {
@@ -466,6 +671,18 @@ def main():
         },
         WHIFF_MODEL_FILE,
     )
+
+    if xwoba_model is not None:
+        joblib.dump(
+            {
+                "model": xwoba_model,
+                "model_name": xwoba_name,
+                "features": MODEL_INPUT_COLS,
+                "pitch_medians": pitch_medians.to_dict(),
+                "target": "estimated_woba_using_speedangle",
+            },
+            XWOBA_MODEL_FILE,
+        )
 
     swing_insights = build_model_insights(
         "swing",
@@ -501,18 +718,24 @@ def main():
         "layman": {
             "validation": validation_summary(TRAIN_END, TEST_START, len(train_df), len(test_df)),
             "combined": combined_output_summary(),
+            "pipeline": three_model_pipeline_summary(),
         },
         "swing": swing_insights,
         "whiff": whiff_insights,
-        "example_pitches": build_example_scenarios(swing_model, whiff_model, train_df, pitch_medians),
+        "example_pitches": build_example_scenarios(
+            swing_model, whiff_model, xwoba_model, train_df, pitch_medians
+        ),
     }
+    if xwoba_insights is not None:
+        insights_payload["xwoba"] = xwoba_insights
     insights_payload["feature_columns"] = MODEL_INPUT_COLS
     INSIGHTS_FILE.write_text(json.dumps(insights_payload, indent=2), encoding="utf-8")
 
     metrics_payload = {
         "statistical_question": (
             "Given pitch characteristics and situational context, estimate "
-            "(A) swing probability and (B) whiff probability given a swing."
+            "(A) swing probability, (B) whiff probability given a swing, and "
+            "(C) expected wOBA on contact for balls in play."
         ),
         "validation": {
             "strategy": "chronological split",
@@ -532,6 +755,14 @@ def main():
             "features": MODEL_INPUT_COLS,
         },
     }
+    if xwoba_model is not None:
+        metrics_payload["xwoba_model"] = {
+            "selected": xwoba_name,
+            "candidates": xwoba_results,
+            "trained_on": "hit_into_play_only",
+            "target": "estimated_woba_using_speedangle",
+            "features": MODEL_INPUT_COLS,
+        }
     METRICS_FILE.write_text(json.dumps(metrics_payload, indent=2), encoding="utf-8")
 
     test_scored = test_df.copy()
@@ -556,8 +787,11 @@ def main():
     )
     batter_preds.to_csv(BATTER_PRED_FILE, index=False)
 
-    export_pitch_lab_artifacts(train_df, train_swings, pitch_medians, qualified)
-    print(f"Saved Pitch Lab deploy bundle: {PITCH_LAB_SWING_FILE.name}, {PITCH_LAB_WHIFF_FILE.name}")
+    export_pitch_lab_artifacts(train_df, train_swings, train_contact, pitch_medians, qualified)
+    lab_files = [PITCH_LAB_SWING_FILE.name, PITCH_LAB_WHIFF_FILE.name]
+    if PITCH_LAB_XWOBA_FILE.exists():
+        lab_files.append(PITCH_LAB_XWOBA_FILE.name)
+    print(f"Saved Pitch Lab deploy bundle: {', '.join(lab_files)}")
 
     grid = build_prediction_grid(train_df, pitch_type="FF")
     grid["pred_swing_prob"] = swing_model.predict_proba(grid[MODEL_INPUT_COLS])[:, 1]
@@ -579,6 +813,8 @@ def main():
 
     print(f"\nSelected swing model: {swing_name}")
     print(f"Selected whiff model: {whiff_name}")
+    if xwoba_name:
+        print(f"Selected xwOBA model: {xwoba_name}")
     print(f"Saved insights to {INSIGHTS_FILE}")
     print(f"Opened model report: {report_path}")
     print(f"Individual charts: {MODEL_DIR / 'charts'}")

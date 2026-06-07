@@ -137,6 +137,49 @@ def combined_output_summary() -> str:
     )
 
 
+def xwoba_output_summary() -> str:
+    return (
+        "**Model C (xwOBAcon):** Trained only on **balls in play** (`hit_into_play`). "
+        "Predicts **expected wOBA on contact** (`estimated_woba_using_speedangle`) from location, "
+        "count, pitch category, velocity, and movement. Answers: *'If he puts this in play, how much damage?'*"
+    )
+
+
+def three_model_pipeline_summary() -> str:
+    return (
+        "**Whiff Lab pipeline:** P(take) and P(whiff) from Models A & B; P(contact) = P(swing) × (1 − P(whiff|swing)). "
+        "When contact is possible, Model C supplies **xwOBAcon**. **xStrike%** = take + whiff in-zone; whiff only O-zone."
+    )
+
+
+def interpret_r2(r2: float) -> str:
+    if r2 >= 0.35:
+        quality = "strong"
+    elif r2 >= 0.15:
+        quality = "moderate"
+    else:
+        quality = "limited"
+    return (
+        f"**R² = {r2:.2f} ({quality}).** "
+        f"The model explains about **{max(0, r2) * 100:.0f}%** of contact-quality variance on held-out batted balls."
+    )
+
+
+def interpret_mae(mae: float) -> str:
+    return (
+        f"**MAE = {mae:.3f} wOBA points.** "
+        f"Typical contact predictions are within ~{mae * 1000:.0f} points of Statcast xwOBAcon."
+    )
+
+
+def interpret_xwoba_damage(prob: float) -> str:
+    if prob >= 0.340:
+        return f"{prob:.3f} xwOBAcon — barrel / hot contact risk."
+    if prob >= 0.280:
+        return f"{prob:.3f} xwOBAcon — league-average contact quality."
+    return f"{prob:.3f} xwOBAcon — weak contact profile."
+
+
 def validation_summary(train_period: str, test_period: str, n_train: int, n_test: int) -> str:
     return (
         f"Both models use the same split: trained on **{train_period}** and tested on "
