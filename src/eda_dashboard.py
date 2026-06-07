@@ -336,8 +336,8 @@ def render_eda_dashboard() -> None:
             <h4>League baselines before personalization</h4>
             <p>2025 MLB Statcast ({SEASON_START} – {SEASON_END}) · qualified hitters · competitive pitch types only.
             Train window: <b>Mar–Aug</b> ({league["n_pitches"]:,} pitches · {league["n_qualified_hitters"]} hitters).</p>
-            <p>This dashboard summarizes <b>what drives swing vs. swing-and-miss</b> at the league level —
-            the same baselines that power The Whiff Lab, prescriptions, and hybrid league + hitter models.</p>
+            <p>This dashboard summarizes <b>what drives favorable pitcher outcomes</b> at the league level —
+            called strikes, in-zone whiffs, and chase whiffs — the baselines behind Whiff Lab prescriptions.</p>
         </div>
         """,
         unsafe_allow_html=True,

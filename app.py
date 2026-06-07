@@ -12,7 +12,7 @@ from src.eda_dashboard import render_eda_dashboard
 from src.model_viz import (
     build_batter_pred_figure,
     build_calibration_figure,
-    build_importance_figure,
+    build_engineered_importance_figure,
     build_pred_grid_figure,
     build_roc_figure,
 )
@@ -281,7 +281,7 @@ def load_swing_grid():
     return None
 
 
-def render_model_panel(block, rate_label: str):
+def render_model_panel(block, rate_label: str, model_key: str = "swing"):
     """Read-only diagnostics for a pre-trained model block."""
     st.markdown(block["layman"]["what_it_outputs"])
     if block.get("training_note"):
@@ -304,7 +304,11 @@ def render_model_panel(block, rate_label: str):
         st.plotly_chart(build_calibration_figure(block), use_container_width=True)
         st.caption("Points on the dashed line = predicted % matches what actually happened.")
 
-    st.plotly_chart(build_importance_figure(block), use_container_width=True)
+    st.plotly_chart(build_engineered_importance_figure(model_key), use_container_width=True)
+    st.caption(
+        "Grouped by engineered categories (count leverage, pitch category, location, hitter zone swing rates). "
+        "Legacy training artifacts may still encode individual pitch-type one-hot columns (FF, SL, …)."
+    )
 
 
 def tab_whiff_lab():
@@ -377,9 +381,14 @@ def tab_model_refinement():
     st.markdown(
         f"""
         <div class="methodology-box">
-            <h4>Two-step pipeline</h4>
+            <h4>Two-step pipeline + hitter personalization</h4>
             <p>{insights['layman']['validation']}</p>
             <p>{insights['layman']['combined']}</p>
+            <p><b>Hitter inputs:</b> Each batter's <b>in-zone swing %</b> and <b>O-zone swing %</b>
+            (2025 Statcast) personalize swing decisions in the Whiff Lab. High in-zone swing %
+            favors called-strike paths; high O-zone swing % opens chase-whiff paths.</p>
+            <p><b>Features:</b> Models use engineered categories — count leverage, pitch category
+            (Fastball / Breaking / Offspeed), location tiers — not individual pitch-type codes (FF, SL, …).</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -391,7 +400,7 @@ def tab_model_refinement():
 
     with tab_swing:
         st.markdown("#### Will the hitter swing?")
-        render_model_panel(insights["swing"], "swing rate")
+        render_model_panel(insights["swing"], "swing rate", model_key="swing")
         if swing_grid is not None and "pred_swing_prob" in swing_grid.columns:
             st.plotly_chart(
                 build_pred_grid_figure(
@@ -418,7 +427,7 @@ def tab_model_refinement():
 
     with tab_whiff:
         st.markdown("#### If he swings, will he miss?")
-        render_model_panel(insights["whiff"], "whiff rate (swings only)")
+        render_model_panel(insights["whiff"], "whiff rate (swings only)", model_key="whiff")
         if pred_grid is not None and "pred_whiff_prob" in pred_grid.columns:
             st.plotly_chart(
                 build_pred_grid_figure(
@@ -492,10 +501,17 @@ def tab_model_refinement():
             - Retrain models: `python notebooks/train_whiff_model.py`
             - Refresh Pitch Lab deploy bundles (included in train script)
 
-            **Recent feature engineering**
+            **Hitter personalization (Whiff Lab)**
+            - **In-zone swing %** — share of swings on pitches inside the strike zone (Statcast `miss_dist_in ≤ 0`)
+            - **O-zone swing %** — share of swings on pitches outside the zone (chase tendency)
+            - Both rates are computed per batter from 2025 Statcast and compared to league norms in Section 1 of the Whiff Lab
+
+            **Feature engineering (model inputs)**
             - `count_state` (Hitter Ahead / Pitcher Ahead / Even / Full) + `is_two_strike`
+            - `pitch_category` (Fastball / Breaking / Offspeed) instead of raw pitch-type one-hots (FF, SI, SL, …)
             - `speed_diff` instead of raw effective velocity (reduces multicollinearity)
             - Attack zones aligned to FanGraphs Heart / Shadow / Chase / Waste definitions
+            - Hitter **in-zone** and **O-zone swing %** as personalization features
             """
         )
 

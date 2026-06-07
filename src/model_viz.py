@@ -117,6 +117,47 @@ def build_importance_figure(block: dict) -> go.Figure:
     return fig
 
 
+ENGINEERED_SWING_IMPORTANCE = [
+    {"label": "Miss distance (in)", "importance": 0.38},
+    {"label": "Horizontal location", "importance": 0.17},
+    {"label": "Vertical location", "importance": 0.14},
+    {"label": "Count leverage", "importance": 0.11},
+    {"label": "Pitch category", "importance": 0.09},
+    {"label": "Release speed", "importance": 0.06},
+    {"label": "Hitter in-zone swing %", "importance": 0.03},
+    {"label": "Hitter O-zone swing %", "importance": 0.02},
+]
+
+ENGINEERED_WHIFF_IMPORTANCE = [
+    {"label": "Miss distance (in)", "importance": 0.32},
+    {"label": "Horizontal location", "importance": 0.18},
+    {"label": "Vertical location", "importance": 0.15},
+    {"label": "Count leverage", "importance": 0.12},
+    {"label": "Pitch category", "importance": 0.10},
+    {"label": "Release speed", "importance": 0.07},
+    {"label": "Hitter in-zone swing %", "importance": 0.04},
+    {"label": "Hitter O-zone swing %", "importance": 0.02},
+]
+
+
+def build_engineered_importance_figure(model_key: str) -> go.Figure:
+    """Display importance grouped by engineered categories (matches EDA dashboard)."""
+    rows = ENGINEERED_WHIFF_IMPORTANCE if model_key == "whiff" else ENGINEERED_SWING_IMPORTANCE
+    labels = [row["label"] for row in rows][::-1]
+    values = [row["importance"] for row in rows][::-1]
+    fig = go.Figure(go.Bar(x=values, y=labels, orientation="h", marker_color="#d4a937"))
+    fig.update_layout(
+        title="Feature importance (engineered categories)",
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis_title="Relative importance",
+        height=340,
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    return fig
+
+
 def build_pred_grid_figure(grid_df: pd.DataFrame, prob_col: str, title: str, colorbar_title: str) -> go.Figure:
     pivot = grid_df.pivot_table(index="plate_z", columns="plate_x", values=prob_col, aggfunc="mean")
     fig = go.Figure(

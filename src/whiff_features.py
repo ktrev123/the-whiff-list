@@ -98,6 +98,13 @@ def engineer_features(df):
         ).astype("float32")
     out["is_whiff"] = out["description"].isin(WHIFF_DESCRIPTIONS).astype("int8")
     out["is_swing"] = out["description"].isin(SWING_DESCRIPTIONS).astype("int8")
+    if {"plate_x", "plate_z", "sz_bot", "sz_top"}.issubset(out.columns):
+        from src.pitch_outcomes import is_in_zone
+
+        out["is_in_zone"] = out.apply(
+            lambda r: int(is_in_zone(float(r["plate_x"]), float(r["plate_z"]), float(r["sz_bot"]), float(r["sz_top"]))),
+            axis=1,
+        )
     if "pitch_type" in out.columns:
         out["pitch_type"] = out["pitch_type"].fillna("UNK").astype(str)
     for col in PITCH_METRIC_COLS:
@@ -117,14 +124,48 @@ def pitch_profile_defaults(train_df: pd.DataFrame, pitch_type: str) -> dict:
     return subset[PITCH_METRIC_COLS].median(numeric_only=True).to_dict()
 
 
+METRIC_FALLBACKS: dict[str, float] = {
+    "speed_diff": 0.0,
+    "spin_axis": 180.0,
+    "release_extension": 6.0,
+}
+
+
+def _median_or_fallback(medians: pd.Series, col: str) -> float:
+    if col in medians.index and pd.notna(medians[col]):
+        return float(medians[col])
+    if col == "speed_diff" and {"effective_speed", "release_speed"}.issubset(medians.index):
+        return float(medians["effective_speed"] - medians["release_speed"])
+    return METRIC_FALLBACKS.get(col, 0.0)
+
+
 def apply_pitch_imputation(df: pd.DataFrame, medians: pd.Series) -> pd.DataFrame:
     out = df.copy()
     if "pitch_type" in out.columns:
         out["pitch_type"] = out["pitch_type"].fillna("UNK").astype(str)
     for col in PITCH_METRIC_COLS:
+        if col not in out.columns:
+            out[col] = np.nan
         out[col] = pd.to_numeric(out[col], errors="coerce").astype("float32")
-        out[col] = out[col].fillna(float(medians[col]))
+        out[col] = out[col].fillna(_median_or_fallback(medians, col))
     return out
+
+
+def model_feature_frame(
+    base_frame: pd.DataFrame,
+    feature_cols: list[str],
+    medians: pd.Series,
+) -> pd.DataFrame:
+    """Align an engineered frame to the columns a saved sklearn pipeline expects."""
+    out = base_frame.copy()
+    if "effective_speed" in feature_cols and "effective_speed" not in out.columns:
+        rs = float(out["release_speed"].iloc[0]) if "release_speed" in out.columns else _median_or_fallback(medians, "release_speed")
+        sd = float(out["speed_diff"].iloc[0]) if "speed_diff" in out.columns else _median_or_fallback(medians, "speed_diff")
+        out["effective_speed"] = rs + sd
+    for col in feature_cols:
+        if col not in out.columns:
+            out[col] = _median_or_fallback(medians, col)
+    return out[feature_cols]
 
 
 def filter_modeling_frame(df, qualified_batters):

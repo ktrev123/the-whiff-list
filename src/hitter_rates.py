@@ -37,21 +37,28 @@ def compute_rates_from_frame(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[st
 
 
 def _rates_from_frame(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
+    in_zone = frame[frame["miss_dist_in"] <= 0]
     out_of_zone = frame[frame["miss_dist_in"] > 0]
 
     batter = frame.groupby("batter", as_index=False).agg(
         swing_rate=("is_swing", "mean"),
         pitches=("is_swing", "size"),
     )
+    in_zone_rates = in_zone.groupby("batter", as_index=False).agg(
+        in_zone_swing_pct=("is_swing", "mean"),
+        in_zone_pitches=("is_swing", "size"),
+    )
     ozone = out_of_zone.groupby("batter", as_index=False).agg(
         o_zone_swing_pct=("is_swing", "mean"),
         o_zone_pitches=("is_swing", "size"),
     )
-    rates = batter.merge(ozone, on="batter", how="left")
+    rates = batter.merge(in_zone_rates, on="batter", how="left").merge(ozone, on="batter", how="left")
+    rates["in_zone_swing_pct"] = rates["in_zone_swing_pct"].fillna(rates["swing_rate"])
     rates["o_zone_swing_pct"] = rates["o_zone_swing_pct"].fillna(0.0)
 
     league = {
         "swing_rate": float(frame["is_swing"].mean()),
+        "in_zone_swing_pct": float(in_zone["is_swing"].mean()) if len(in_zone) else 0.0,
         "o_zone_swing_pct": float(out_of_zone["is_swing"].mean()) if len(out_of_zone) else 0.0,
     }
     return rates, league
@@ -74,11 +81,29 @@ def export_hitter_rates(df: pd.DataFrame, rates_path: Path = RATES_FILE, league_
 @st.cache_data
 def load_hitter_rates() -> pd.DataFrame:
     if RATES_FILE.exists():
-        return pd.read_csv(RATES_FILE)
+        rates = pd.read_csv(RATES_FILE)
+        if "in_zone_swing_pct" not in rates.columns and STATCAST_FILE.exists():
+            computed, _ = compute_hitter_rates(pd.read_parquet(STATCAST_FILE))
+            rates = rates.merge(
+                computed[["batter", "in_zone_swing_pct", "in_zone_pitches"]],
+                on="batter",
+                how="left",
+            )
+            rates["in_zone_swing_pct"] = rates["in_zone_swing_pct"].fillna(rates["swing_rate"])
+            rates.to_csv(RATES_FILE, index=False, float_format="%.6f")
+        return rates
 
     if not STATCAST_FILE.exists():
         return pd.DataFrame(
-            columns=["batter", "swing_rate", "pitches", "o_zone_swing_pct", "o_zone_pitches"]
+            columns=[
+                "batter",
+                "swing_rate",
+                "pitches",
+                "in_zone_swing_pct",
+                "in_zone_pitches",
+                "o_zone_swing_pct",
+                "o_zone_pitches",
+            ]
         )
 
     df = pd.read_parquet(STATCAST_FILE)
@@ -89,11 +114,21 @@ def load_hitter_rates() -> pd.DataFrame:
 
 @st.cache_data
 def load_league_rates() -> dict[str, float]:
+    defaults = {
+        "swing_rate": 0.47,
+        "in_zone_swing_pct": 0.68,
+        "o_zone_swing_pct": 0.30,
+    }
     if LEAGUE_FILE.exists():
-        return json.loads(LEAGUE_FILE.read_text(encoding="utf-8"))
+        league = json.loads(LEAGUE_FILE.read_text(encoding="utf-8"))
+        if "in_zone_swing_pct" not in league and STATCAST_FILE.exists():
+            _, computed = compute_hitter_rates(pd.read_parquet(STATCAST_FILE))
+            league["in_zone_swing_pct"] = computed["in_zone_swing_pct"]
+            LEAGUE_FILE.write_text(json.dumps(league, indent=2), encoding="utf-8")
+        return {**defaults, **league}
 
     if not STATCAST_FILE.exists():
-        return {"swing_rate": 0.47, "o_zone_swing_pct": 0.30}
+        return defaults
 
     df = pd.read_parquet(STATCAST_FILE)
     _, league = compute_hitter_rates(df)
@@ -121,6 +156,7 @@ def lookup_hitter_rates(batter_id: int) -> dict[str, float] | None:
     row = match.iloc[0]
     return {
         "swing_rate": float(row["swing_rate"]),
+        "in_zone_swing_pct": float(row.get("in_zone_swing_pct", row["swing_rate"])),
         "o_zone_swing_pct": float(row["o_zone_swing_pct"]),
     }
 
@@ -150,14 +186,14 @@ def hitter_stats_html(batter_id: int) -> str:
         )
 
     swing = format_stat_line(
-        "Swing %",
-        "League average swing %",
-        player["swing_rate"],
-        league["swing_rate"],
+        "In-zone swing %",
+        "League in-zone swing %",
+        player["in_zone_swing_pct"],
+        league.get("in_zone_swing_pct", league["swing_rate"]),
     )
     ozone = format_stat_line(
         "O-zone swing %",
-        "League average O-zone swing %",
+        "League O-zone swing %",
         player["o_zone_swing_pct"],
         league["o_zone_swing_pct"],
         lower_is_better=True,

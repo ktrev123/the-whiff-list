@@ -18,35 +18,43 @@ from src.attack_zones import (
     ZONE_FILL,
     ZONE_ORDER,
     assign_attack_zone,
+    boundary_signed_inches,
     infer_horizontal,
     infer_vertical,
     random_pitch_location,
     zone_description,
 )
-from src.hitter_rates import hitter_stats_html
+from src.hitter_rates import hitter_stats_html, load_league_rates, lookup_hitter_rates
 from src.pitch_lab_inputs import (
     PITCH_FAMILIES,
     PITCH_FAMILY_DEFAULT_CODE,
-    PITCH_FAMILY_DISPLAY_PITCH,
     VELOCITY_INTENT_TO_TIER,
     apply_physics_tiers,
-    count_leverage_label,
     format_count_display,
+)
+from src.pitch_outcomes import (
+    OUTCOME_LABELS,
+    enrich_probs_dict,
+    is_in_zone,
+    mock_pitch_probs,
+    outcome_is_favorable,
+    simulate_outcome,
 )
 from src.pitch_prescription import (
     HORIZONTAL_OPTIONS,
     VERTICAL_OPTIONS,
     VELOCITY_INTENTS,
-    build_target_heatmap_placeholder,
     compare_strategy_guess,
-    match_row,
-    mock_count_prescription,
+    recommend_best_pitch,
+    score_thrown_pitch,
 )
 from src.whiff_features import (
     MODEL_INPUT_COLS,
     PITCH_METRIC_COLS,
+    _median_or_fallback,
     apply_pitch_imputation,
     engineer_features,
+    model_feature_frame,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -189,6 +197,64 @@ def _commit_pitch(sz_bot: float, sz_top: float, platoon_bats: str) -> None:
     st.session_state.lab_last_sel_sig = None
     st.session_state.lab_need_map_click = False
     st.session_state.lab_has_pitched = True
+    st.session_state.lab_sim_outcome = None
+
+
+def _make_predict_fn(
+    swing_bundle,
+    whiff_bundle,
+    *,
+    balls: int,
+    strikes: int,
+    runners_on: int,
+    sz_bot: float,
+    sz_top: float,
+    profile_lookup: dict,
+    hitter_rates: dict[str, float] | None = None,
+) -> callable:
+    """Closure for recommend_best_pitch grid search."""
+
+    def _predict(
+        *,
+        plate_x: float,
+        plate_z: float,
+        pitch_family: str,
+        velocity_intent: str,
+        **_,
+    ) -> dict[str, float]:
+        pitch_type = PITCH_FAMILY_DEFAULT_CODE[pitch_family]
+        speed_tier = VELOCITY_INTENT_TO_TIER[velocity_intent]
+        pitch_profile = apply_physics_tiers(
+            pitch_family,
+            release_speed=speed_tier,
+            vertical_break="Average",
+            spin_rate="Average",
+            horizontal_break="Average",
+        )
+        medians = pd.Series(swing_bundle["pitch_medians"])
+        for col in PITCH_METRIC_COLS:
+            if col not in pitch_profile:
+                pitch_profile[col] = _median_or_fallback(medians, col)
+        lab_profile = profile_lookup.get(pitch_type, {})
+        if lab_profile:
+            for col in PITCH_METRIC_COLS:
+                if col in lab_profile:
+                    pitch_profile[col] = float(lab_profile[col])
+        row = build_pitch_row(
+            plate_x, plate_z, sz_bot, sz_top, balls, strikes, runners_on, pitch_type, pitch_profile
+        )
+        return predict_probs(
+            swing_bundle,
+            whiff_bundle,
+            row,
+            balls=balls,
+            strikes=strikes,
+            pitch_family=pitch_family,
+            velocity_intent=velocity_intent,
+            hitter_rates=hitter_rates,
+        )
+
+    return _predict
 
 
 MLB_HEADSHOT_URL = (
@@ -236,7 +302,53 @@ def plate_side_labels(bats: str) -> tuple[str, str]:
 def load_model_bundle(path: Path):
     if not path.exists():
         return None
-    return joblib.load(path)
+    bundle = joblib.load(path)
+    return _patch_model_bundle(bundle)
+
+
+def _patch_model_bundle(bundle: dict | None) -> dict | None:
+    """Fix sklearn 1.6 loading artifacts saved under 1.8 (missing multi_class on LogisticRegression)."""
+    if bundle is None:
+        return None
+    model = bundle.get("model")
+    if model is None or not hasattr(model, "named_steps"):
+        return bundle
+    clf = model.named_steps.get("clf")
+    if clf is None and getattr(model, "steps", None):
+        clf = model.steps[-1][1]
+    if clf is not None and not hasattr(clf, "multi_class"):
+        clf.multi_class = "auto"
+    return bundle
+
+
+def pitch_models_predict_available(swing_bundle, whiff_bundle) -> bool:
+    """True when saved sklearn pipelines can score a probe pitch (not mock fallback)."""
+    if swing_bundle is None or whiff_bundle is None:
+        return False
+    profile = {
+        "release_speed": 94.0,
+        "speed_diff": 0.0,
+        "pfx_x": -4.0,
+        "pfx_z": 8.0,
+        "release_spin_rate": 2280.0,
+        "spin_axis": 180.0,
+        "release_extension": 6.0,
+    }
+    row = build_pitch_row(0.35, 2.5, 1.5, 3.5, 1, 1, 0, "FF", profile)
+    try:
+        medians = pd.Series(swing_bundle["pitch_medians"])
+        engineered = apply_pitch_imputation(engineer_features(pd.DataFrame([row])), medians)
+        swing_frame = model_feature_frame(
+            engineered, list(swing_bundle.get("features", MODEL_INPUT_COLS)), medians
+        )
+        whiff_frame = model_feature_frame(
+            engineered, list(whiff_bundle.get("features", MODEL_INPUT_COLS)), medians
+        )
+        swing_bundle["model"].predict_proba(swing_frame)
+        whiff_bundle["model"].predict_proba(whiff_frame)
+        return True
+    except Exception:
+        return False
 
 
 @st.cache_resource
@@ -328,17 +440,57 @@ def build_pitch_row(
     return pd.Series(row)
 
 
-def predict_probs(swing_bundle, whiff_bundle, row: pd.Series) -> dict[str, float]:
-    medians = pd.Series(swing_bundle["pitch_medians"])
-    frame = apply_pitch_imputation(engineer_features(pd.DataFrame([row])), medians)
-    swing_p = float(swing_bundle["model"].predict_proba(frame[MODEL_INPUT_COLS])[:, 1][0])
-    whiff_p = float(whiff_bundle["model"].predict_proba(frame[MODEL_INPUT_COLS])[:, 1][0])
-    return {
-        "swing": swing_p,
-        "whiff_if_swing": whiff_p,
-        "swing_whiff": swing_p * whiff_p,
-        "miss_dist_in": float(frame["miss_dist_in"].iloc[0]),
-    }
+def predict_probs(
+    swing_bundle,
+    whiff_bundle,
+    row: pd.Series,
+    *,
+    balls: int | None = None,
+    strikes: int | None = None,
+    pitch_family: str = "Fastball",
+    velocity_intent: str = "Average",
+    hitter_rates: dict[str, float] | None = None,
+) -> dict[str, float]:
+    plate_x = float(row["plate_x"])
+    plate_z = float(row["plate_z"])
+    sz_bot = float(row["sz_bot"])
+    sz_top = float(row["sz_top"])
+    in_zone = bool(is_in_zone(plate_x, plate_z, sz_bot, sz_top))
+    attack_zone = assign_attack_zone(plate_x, plate_z, sz_top, sz_bot)
+    try:
+        medians = pd.Series(swing_bundle["pitch_medians"])
+        engineered = apply_pitch_imputation(engineer_features(pd.DataFrame([row])), medians)
+        swing_cols = list(swing_bundle.get("features", MODEL_INPUT_COLS))
+        whiff_cols = list(whiff_bundle.get("features", MODEL_INPUT_COLS))
+        swing_frame = model_feature_frame(engineered, swing_cols, medians)
+        whiff_frame = model_feature_frame(engineered, whiff_cols, medians)
+        swing_p = float(swing_bundle["model"].predict_proba(swing_frame)[:, 1][0])
+        whiff_p = float(whiff_bundle["model"].predict_proba(whiff_frame)[:, 1][0])
+    except Exception:
+        b = int(balls if balls is not None else row.get("balls", 0))
+        s = int(strikes if strikes is not None else row.get("strikes", 0))
+        miss_dist_in = max(0.0, -boundary_signed_inches(plate_x, plate_z, sz_top, sz_bot))
+        rates = hitter_rates or {}
+        swing_p, whiff_p = mock_pitch_probs(
+            balls=b,
+            strikes=s,
+            in_zone=in_zone,
+            pitch_family=pitch_family,
+            velocity_intent=velocity_intent,
+            miss_dist_in=miss_dist_in,
+            attack_zone=attack_zone,
+            in_zone_swing_pct=rates.get("in_zone_swing_pct"),
+            o_zone_swing_pct=rates.get("o_zone_swing_pct"),
+        )
+    return enrich_probs_dict(
+        {
+            "swing": swing_p,
+            "whiff_if_swing": whiff_p,
+            "swing_whiff": swing_p * whiff_p,
+            "miss_dist_in": float(row.get("miss_dist_in", 0)),
+            "in_zone": in_zone,
+        }
+    )
 
 
 @st.cache_data
@@ -637,20 +789,61 @@ def _render_strategy_feedback(
     guess_vertical: str,
     guess_horizontal: str,
     guess_velocity: str,
+    plate_x: float,
+    plate_z: float,
+    sz_bot: float,
+    sz_top: float,
+    bats: str,
+    predict_fn: callable | None,
+    predict_kwargs: dict,
+    simulated_outcome: str | None,
+    hitter_rates: dict[str, float] | None = None,
+    models_live: bool = True,
 ) -> None:
-    """Show prescription and compare user strategy guesses after Pitch It!"""
+    """Show best pitch for situation, thrown-pitch outcomes, and strategy comparison."""
     st.markdown("---")
     st.markdown("#### 4 · Results")
 
     if not has_pitched:
-        st.info("Lock in your strategy above, then click **Pitch It!** to reveal the optimal prescription.")
+        st.info("Lock in your strategy above, then click **Pitch It!** to see the best pitch for this situation.")
         return
 
-    rx = mock_count_prescription(balls, strikes, runners_on)
+    if not models_live:
+        st.caption(
+            "Using count + hitter zone-rate estimates (ML bundles unavailable or incompatible). "
+            "Run `pip install -r requirements.txt` and restart, or retrain with `python notebooks/train_whiff_model.py`."
+        )
+
+    kwargs = {**predict_kwargs, "hitter_rates": hitter_rates or predict_kwargs.get("hitter_rates")}
+
+    rx = recommend_best_pitch(
+        balls=balls,
+        strikes=strikes,
+        runners_on=runners_on,
+        sz_top=sz_top,
+        sz_bot=sz_bot,
+        bats=bats,
+        predict_fn=predict_fn,
+        predict_kwargs=kwargs,
+    )
+
+    thrown = score_thrown_pitch(
+        balls=balls,
+        strikes=strikes,
+        plate_x=plate_x,
+        plate_z=plate_z,
+        pitch_family=guess_family,
+        velocity_intent=guess_velocity,
+        sz_top=sz_top,
+        sz_bot=sz_bot,
+        predict_fn=predict_fn,
+        predict_kwargs=kwargs,
+    )
+
     cmp = compare_strategy_guess(
         guess_family=guess_family,
-        guess_vertical=guess_vertical,
-        guess_horizontal=guess_horizontal,
+        guess_vertical=guess_vertical if guess_vertical != "—" else rx["vertical"],
+        guess_horizontal=guess_horizontal if guess_horizontal != "—" else rx["horizontal"],
         guess_velocity=guess_velocity,
         recommendation=rx,
     )
@@ -658,10 +851,11 @@ def _render_strategy_feedback(
     st.markdown(
         f"""
         <div class="whiff-prescription-banner">
-            <div class="whiff-prescription-label">Optimal prescription</div>
+            <div class="whiff-prescription-label">Best pitch for this situation</div>
             <div class="whiff-prescription-headline">{rx["headline"]}</div>
             <div class="whiff-prescription-meta">
-                Count: <b>{rx["count"]}</b> · Velocity intent: <b>{rx["velocity_intent"]}</b> · {rx["confidence"]}
+                Count: <b>{rx["count"]}</b> · {rx["velocity_intent"]} intent ·
+                P(favorable) <b>{rx["p_favorable"]:.0%}</b>
             </div>
             <div class="whiff-prescription-rationale">{rx["rationale"]}</div>
         </div>
@@ -669,41 +863,51 @@ def _render_strategy_feedback(
         unsafe_allow_html=True,
     )
 
+    st.markdown("**Optimal outcome mix**")
+    o1, o2, o3, o4 = st.columns(4)
+    o1.metric("Called strike", f"{rx['p_called_strike']:.0%}")
+    o2.metric("In-zone whiff", f"{rx['p_zone_whiff']:.0%}")
+    o3.metric("Chase whiff", f"{rx['p_chase_whiff']:.0%}")
+    o4.metric("P(favorable)", f"{rx['p_favorable']:.0%}")
+
+    st.markdown("**Your pitch (thrown location)**")
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("Called strike", f"{thrown['p_called_strike']:.0%}")
+    t2.metric("In-zone whiff", f"{thrown['p_zone_whiff']:.0%}")
+    t3.metric("Chase whiff", f"{thrown['p_chase_whiff']:.0%}")
+    t4.metric("P(favorable)", f"{thrown['p_favorable']:.0%}")
+
+    if simulated_outcome is None and has_pitched:
+        if "lab_rng" not in st.session_state:
+            st.session_state.lab_rng = np.random.default_rng()
+        simulated_outcome = simulate_outcome(thrown, st.session_state.lab_rng)
+        st.session_state.lab_sim_outcome = simulated_outcome
+
+    if simulated_outcome:
+        label = OUTCOME_LABELS.get(simulated_outcome, simulated_outcome)
+        if outcome_is_favorable(simulated_outcome):
+            st.success(f"Simulated outcome: **{label}** ✅ — favorable for the pitcher.")
+        else:
+            st.error(f"Simulated outcome: **{label}** ❌ — unfavorable for the pitcher.")
+
     st.markdown("**Your strategy vs. optimal**")
-    st.markdown(
-        match_row(
-            "Pitch Family Match (The Strategy)",
-            bool(cmp["family_match"]),
-            f"You guessed **{guess_family}** · Optimal: **{rx['pitch_family']}**",
-        )
-    )
-    st.markdown(
-        match_row(
-            "Location Match (Vertical & Horizontal)",
-            bool(cmp["location_match"]),
-            "Location drives ~33% of the outcome · "
-            f"You guessed **{guess_horizontal} / {guess_vertical}** · "
-            f"Optimal: **{rx['horizontal']} / {rx['vertical']}**",
-        )
-    )
-    st.markdown(
-        match_row(
-            "Velocity Intent Match",
-            bool(cmp["velocity_match"]),
-            "Speed drives ~19% of whiff execution · "
-            f"You guessed **{guess_velocity}** · Optimal: **{rx['velocity_intent']}**",
-        )
-    )
+    guess_vert = guess_vertical if guess_vertical != "—" else rx["vertical"]
+    guess_horiz = guess_horizontal if guess_horizontal != "—" else rx["horizontal"]
+    for label, matched, yours, optimal in (
+        ("Pitch family", bool(cmp["family_match"]), guess_family, rx["pitch_family"]),
+        ("Location", bool(cmp["location_match"]), f"{guess_horiz} / {guess_vert}", f"{rx['horizontal']} / {rx['vertical']}"),
+        ("Velocity intent", bool(cmp["velocity_match"]), guess_velocity, rx["velocity_intent"]),
+    ):
+        icon = "✅" if matched else "❌"
+        st.markdown(f"{icon} **{label}:** {yours} · Best: **{optimal}**")
 
     score = int(cmp["score"])
     if score == 3:
-        st.success(f"Perfect read — {score}/3 strategy elements matched.")
+        st.success(f"Perfect read — {score}/3 strategy elements matched the optimal call.")
     elif score >= 2:
         st.info(f"Strong plan — {score}/3 strategy elements matched.")
     else:
         st.warning(f"Room to improve — {score}/3 strategy elements matched.")
-
-    st.plotly_chart(build_target_heatmap_placeholder(), use_container_width=True, key="lab_target_heatmap")
 
 
 def render_whiff_lab(
@@ -722,6 +926,7 @@ def render_whiff_lab(
 
     swing_bundle, whiff_bundle = load_pitch_lab_models()
     models_ready = swing_bundle is not None and whiff_bundle is not None
+    models_live = models_ready and pitch_models_predict_available(swing_bundle, whiff_bundle)
 
     profiles = load_pitch_lab_profiles()
     zones_df = load_hitter_strike_zones()
@@ -760,8 +965,9 @@ def render_whiff_lab(
         """
         <div class="methodology-box">
             <h4>Game-planning flow</h4>
-            <p>Define the situation, set up pitch location, <b>lock your strategy guess</b>, then click
-            <b>Pitch It!</b> to see the optimal prescription and how your read compares.</p>
+            <p>Define the situation, set up location, lock your strategy guess, then click <b>Pitch It!</b>
+            The engine finds the <b>best pitch for favorable outcomes</b>: called strikes, in-zone whiffs,
+            and chase whiffs.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -789,6 +995,26 @@ def render_whiff_lab(
     )
 
     batter_id = int(qualified_df.loc[qualified_df["player_name"] == hitter, "batter"].iloc[0])
+    league_rates = load_league_rates()
+    hitter_rates = lookup_hitter_rates(batter_id) or league_rates
+    hz1, hz2, hz3 = st.columns(3)
+    hz1.metric(
+        "In-zone swing %",
+        f"{hitter_rates['in_zone_swing_pct']:.1%}",
+        delta=f"{(hitter_rates['in_zone_swing_pct'] - league_rates['in_zone_swing_pct']) * 100:+.1f} vs league",
+        delta_color="off",
+    )
+    hz2.metric(
+        "O-zone swing %",
+        f"{hitter_rates['o_zone_swing_pct']:.1%}",
+        delta=f"{(hitter_rates['o_zone_swing_pct'] - league_rates['o_zone_swing_pct']) * 100:+.1f} vs league",
+        delta_color="off",
+    )
+    hz3.caption(
+        f"League norms: **{league_rates['in_zone_swing_pct']:.1%}** in-zone · "
+        f"**{league_rates['o_zone_swing_pct']:.1%}** O-zone — used to personalize swing decisions."
+    )
+
     raw_bats = batter_handedness(batter_stand, batter_id)
     platoon_bats = resolve_bats_for_platoon(raw_bats)
     sz_bot, sz_top = hitter_strike_zone(zones_df, profiles, batter_id)
@@ -966,6 +1192,20 @@ def render_whiff_lab(
             if col in lab_profile and col not in pitch_profile:
                 pitch_profile[col] = float(lab_profile[col])
 
+    predict_fn = None
+    if models_ready:
+        predict_fn = _make_predict_fn(
+            swing_bundle,
+            whiff_bundle,
+            balls=balls,
+            strikes=strikes,
+            runners_on=runners_on,
+            sz_bot=sz_bot,
+            sz_top=sz_top,
+            profile_lookup=profile_lookup,
+            hitter_rates=hitter_rates,
+        )
+
     _render_strategy_feedback(
         has_pitched=bool(st.session_state.get("lab_has_pitched")),
         balls=balls,
@@ -975,6 +1215,16 @@ def render_whiff_lab(
         guess_vertical=guess_vertical if plot_px is not None or not custom_mode else "—",
         guess_horizontal=guess_horizontal if plot_px is not None or not custom_mode else "—",
         guess_velocity=guess_velocity,
+        plate_x=plate_x,
+        plate_z=plate_z,
+        sz_bot=sz_bot,
+        sz_top=sz_top,
+        bats=platoon_bats,
+        predict_fn=predict_fn,
+        predict_kwargs={},
+        simulated_outcome=st.session_state.get("lab_sim_outcome"),
+        hitter_rates=hitter_rates,
+        models_live=models_live,
     )
 
     if models_ready and st.session_state.get("lab_has_pitched"):
@@ -983,11 +1233,15 @@ def render_whiff_lab(
                 plate_x, plate_z, sz_bot, sz_top, balls, strikes, runners_on, pitch_type, pitch_profile
             )
             probs = predict_probs(swing_bundle, whiff_bundle, row)
-            m1, m2, m3 = st.columns(3)
-            m1.metric("P(Swing)", f"{probs['swing'] * 100:.1f}%")
-            m2.metric("P(Whiff | Swing)", f"{probs['whiff_if_swing'] * 100:.1f}%")
-            m3.metric("P(Swinging Strike)", f"{probs['swing_whiff'] * 100:.1f}%")
-            st.caption(f"Thrown to {attack_zone} @ {plate_x:+.2f}/{plate_z:.2f} ft · {guess_family} ({guess_velocity})")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("P(favorable)", f"{probs['p_favorable'] * 100:.1f}%")
+            m2.metric("Called strike", f"{probs['p_called_strike'] * 100:.1f}%")
+            m3.metric("In-zone whiff", f"{probs['p_zone_whiff'] * 100:.1f}%")
+            m4.metric("Chase whiff", f"{probs['p_chase_whiff'] * 100:.1f}%")
+            st.caption(
+                f"Thrown to {attack_zone} @ {plate_x:+.2f}/{plate_z:.2f} ft · "
+                f"{guess_family} ({guess_velocity}) · in zone: {probs['in_zone']}"
+            )
 
 
 def render_pitch_lab(qualified_df: pd.DataFrame, batter_stand: pd.DataFrame | None = None) -> None:
