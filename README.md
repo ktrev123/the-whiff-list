@@ -1,5 +1,7 @@
 # AI Catcher: Pitch Optimizer
 
+**Live app:** https://ai-catcher-abshire-portfolio.streamlit.app/
+
 Interactive Streamlit dashboard that compares your pitch call against an AI catcher. The app simulates expected run value (ERV) across the strike zone using swing, whiff, and xwOBAcon models trained on 2025 Statcast data.
 
 ## Quick start
@@ -58,6 +60,7 @@ pytest
 
 ## Deployment notes
 
+- **Live demo:** https://ai-catcher-abshire-portfolio.streamlit.app/ (Streamlit Cloud, repo `ktrev123/the-whiff-list`, entry `app.py`)
 - **Streamlit Cloud**: point the app entry to `app.py`. Upload or generate `data/batter_roster.parquet`, `data/batter_zone_xwobacon.parquet`, and `data/players.parquet`; models are fetched from GitHub Releases at runtime.
 - **Local**: keep `data/league_average_physics.csv` present (small CSV, tracked in git).
 - Large parquet files and model weights are gitignored; publish release assets or rebuild locally before deploying.
