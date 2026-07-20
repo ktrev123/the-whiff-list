@@ -1,0 +1,34 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Personal / generated docs
+*.docx
+
+# Large model artifacts (download from GitHub Release or retrain locally)
+models/*.joblib
+
+# Large Statcast / modeling data (rebuild via notebooks or scripts)
+data/*.parquet
+data/*.parquet.meta
+data/raw_parquet/
+data/rolling_metric_plots/
+data/ev_scored_pitches.parquet
+
+# Small runtime data shipped with the app (un-ignore)
+!data/batter_roster.parquet
+!data/batter_zone_xwobacon.parquet
+!data/players.parquet
+
+# Archived snapshots
+archive/
